@@ -500,20 +500,48 @@ window.__ModuleLoader__.load({
     let modelChunk = null
 
     /**
+     * Subscribers told when the chunk arrives.
+     *
+     * A module variable alone cannot drive a re-render: the seats below read
+     * `modelChunk` during render, and React only re-renders when a component's
+     * own state changes. Assigning the variable therefore left every cell stuck
+     * on the null render until something unrelated forced a redraw — which is
+     * how the subagent dropdown could vanish from a header this plugin owns.
+     * @type {Set<function(): void>}
+     */
+    const chunkListeners = new Set()
+
+    /** Publish the chunk and wake every seat waiting on it. */
+    function setModelChunk(loaded) {
+      modelChunk = loaded
+      for (const listener of chunkListeners) listener()
+    }
+
+    /**
      * Hand the chunk's exports down to a component, or render nothing.
      *
      * Every consumer here is a React component that reads these functions DURING
      * render, so a component cannot be given them until the chunk has resolved.
      * A still-unloaded chunk therefore renders null rather than throwing, which
-     * is what keeps a failed fetch from taking the conversation header down; the
-     * chip reappears on the next render once {@link withModel} publishes the real
-     * exports.
+     * is what keeps a failed fetch from taking the conversation header down.
+     *
+     * The wrapper subscribes to the chunk so that its arrival redraws the cell.
+     * Without that subscription the seat would render its null form once and
+     * then never again: the cell this plugin owns would stay blank for the rest
+     * of the page's life, taking the shipped dropdown with it.
      *
      * @param {function(function(any): any): any} Component - The wrapped component.
      * @returns {function(object): any} A component that reads the chunk's exports.
      */
     function withModel(Component) {
       return function ModelProps(props) {
+        const [, redraw] = React.useReducer((n) => n + 1, 0)
+        React.useEffect(() => {
+          if (modelChunk !== null) return undefined
+          const listener = () => { redraw() }
+          chunkListeners.add(listener)
+          return () => { chunkListeners.delete(listener) }
+        }, [])
         if (modelChunk === null) return null
         return h(Component, { ...props, m: modelChunk })
       }
@@ -1602,13 +1630,13 @@ window.__ModuleLoader__.load({
       // (`:717-740`) — which is why the chunk declares `chunk: 'client.model.js'`.
       //
       // A fetch that never lands must not take the header down with it, so the
-      // rejection is swallowed and `modelChunk` simply stays null; every seat
-      // then renders nothing, and the page's other occupants keep their places.
+      // rejection is swallowed and the chunk stays null; every seat then renders
+      // nothing, and the page's other occupants keep their places.
       Promise.resolve()
         .then(() => require.async('./client.model.js'))
-        .then((loaded) => { modelChunk = loaded })
+        .then((loaded) => { setModelChunk(loaded) })
         .catch(() => {
-          modelChunk = null
+          setModelChunk(null)
         })
 
       // The chip tooltip enriches itself from the live catalog, and this is the
