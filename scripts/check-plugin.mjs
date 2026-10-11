@@ -293,8 +293,8 @@ check('the route marker stays silent when nothing distinguishes the child', asyn
  * Dictionaries
  * ------------------------------------------------------------------ */
 
-check('all three dictionaries exist and parse', async () => {
-  for (const locale of ['en', 'ro', 'zh']) {
+check('every shipped dictionary exists and parses', async () => {
+  for (const locale of ['en', 'ro']) {
     const raw = await read(`locale/${locale}.json`)
     const nested = JSON.parse(raw)
     assert.ok(nested.chip !== undefined, `${locale}.json needs a chip group`)

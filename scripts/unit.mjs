@@ -655,20 +655,18 @@ test('formatModelGroup writes the count, the model and the effort when set', () 
  * Locale parity: nested on-disk files vs flattened inlined copies
  * ------------------------------------------------------------------ */
 
-test('the three nested dictionaries share one key set', async () => {
+test('the nested dictionaries share one key set', async () => {
   const en = await readFlatDictionary('en')
   const ro = await readFlatDictionary('ro')
-  const zh = await readFlatDictionary('zh')
 
   const enKeys = Object.keys(en).sort()
   assert.deepEqual(Object.keys(ro).sort(), enKeys)
-  assert.deepEqual(Object.keys(zh).sort(), enKeys)
 })
 
 test('the nested dictionaries flatten to exactly the inlined browser copies', async () => {
   const inlined = await readInlinedDictionaries()
 
-  for (const locale of ['en', 'ro', 'zh']) {
+  for (const locale of ['en', 'ro']) {
     const flat = await readFlatDictionary(locale)
     assert.deepEqual(Object.keys(inlined[locale]).sort(), Object.keys(flat).sort(), `${locale} key set`)
     for (const [key, value] of Object.entries(flat)) {
@@ -683,7 +681,7 @@ test('every dictionary value uses the same single-brace placeholders', async () 
 
   const placeholdersOf = (value) => (value.match(/\{[a-zA-Z]+\}/g) ?? []).sort()
 
-  for (const locale of ['en', 'ro', 'zh']) {
+  for (const locale of ['en', 'ro']) {
     const flat = await readFlatDictionary(locale)
     for (const [key, value] of Object.entries(flat)) {
       assert.deepEqual(placeholdersOf(value), placeholdersOf(en[key]), `${locale}.${key} placeholders`)

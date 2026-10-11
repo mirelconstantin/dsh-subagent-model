@@ -216,7 +216,7 @@ window.__ModuleLoader__.load({
      * (`dsh-client-locale/lib/client.js:1429-1435`) — it never walks a nested
      * object. The on-disk `locale/*.json` files are nested for readability;
      * these are the flattened forms of exactly those files, and every key below
-     * exists in en.json, ro.json and zh.json.
+     * exists in en.json and ro.json.
      *
      * A missing key renders as the RAW KEY STRING (`:1425`), so a typo is
      * visible on screen rather than loud. Keep the two sets in step.
@@ -328,60 +328,6 @@ window.__ModuleLoader__.load({
       'row.mode': 'Tip',
       'row.modeOneShot': 'one-shot, doar citire',
       'row.modeContinuable': 'continuabil',
-    }
-
-    /** @type {Record<string, string>} */
-    const zh = {
-      'chip.prefix': '模型',
-      'chip.aria': '会话模型：{model}',
-      'chip.title': '此会话使用 {model}',
-      'chip.titleWithEffort': '此会话使用 {model}，推理强度 {effort}',
-      'chip.titleInherited': '此会话继承自父会话的 {model}',
-      'chip.unknown': '尚无模型',
-      'chip.pending': '切换中',
-      'chip.inherited': '继承',
-      'chip.total': '共 {count} 个，含嵌套',
-      'chip.differs': '自有模型 {model}，与父会话（{parent}）不同',
-      'chip.treeInherited': '从父会话继承 {model}',
-      'chip.own': '自有模型 {model}',
-      'chip.countTotal': '{count} 个子智能体',
-      'chip.countRunning': '{count} 个正在运行',
-      'chip.treeAria': '子智能体会话',
-      'chip.loading': '正在加载子智能体…',
-      'chip.loadError': '无法加载子智能体',
-      'chip.retry': '重试',
-      'chip.openAside': '侧边打开',
-      'chip.openAsideAria': '在侧边打开 {label}',
-      'chip.modeOneShot': '一次性',
-      'chip.modeContinuable': '可继续',
-      'chip.modeUnknown': '类型未知',
-      'chip.actRunning': '正在运行',
-      'chip.actCompleted': '已完成',
-      'chip.actInactive': '空闲',
-      'chip.branchExpand': '展开 {label}',
-      'chip.branchCollapse': '收起 {label}',
-      'tip.summary': '{count} 个子智能体：',
-      'tip.byDepth': '按代数：',
-      'tip.depth': '第 {depth} 代',
-      'tip.unknownOnly': '模型未知',
-      'tip.inherited': '{count} 个继承自父会话的模型',
-      'tip.running': '{count} 个正在运行',
-      'row.label': '模型',
-      'row.unknown': '尚无模型',
-      'row.inherited': '继承自父会话',
-      'row.inheritedFrom': '继承',
-      'row.title': '此会话上次使用或即将使用的模型',
-      'row.activity': '工作量',
-      'row.turns': '{count} 个回合',
-      'row.steps': '{count} 个步骤',
-      'row.time': '活跃时间',
-      'row.tokens': '已生成',
-      'row.task': '任务',
-      'row.switch': '路由变更',
-      'row.switchFrom': '{from} → {to}，尚未应用',
-      'row.mode': '类型',
-      'row.modeOneShot': '一次性，只读',
-      'row.modeContinuable': '可继续',
     }
 
     /**
@@ -1634,7 +1580,6 @@ window.__ModuleLoader__.load({
           try {
             disposers.push(asDisposer(locale.register(NS, 'en', en)))
             disposers.push(asDisposer(locale.register(NS, 'ro', ro)))
-            disposers.push(asDisposer(locale.register(NS, 'zh', zh)))
           } catch (e) {
             // Duplicate apply (HMR): keep the existing dictionaries.
           }
