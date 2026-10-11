@@ -1,0 +1,71 @@
+{
+  "name": "dsh-subagent-model",
+  "version": "1.0.0",
+  "description": "Model visibility for DeepSeek Harness: a header chip naming the model and reasoning effort each Session runs on, a subagent dropdown that marks which child carries its own route, and sidebar hover cards showing what each conversation actually did.",
+  "icon": "./icon.svg",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./client": "./src/client.js",
+    "./model": "./src/model.js",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "scripts",
+    "locale/*.json",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "cordis",
+    "plugin",
+    "dsh-plugin",
+    "dsh-plugins",
+    "dsh-external",
+    "deepseek-harness-plugin",
+    "client-ui",
+    "subagent",
+    "model-selection",
+    "reasoning-effort",
+    "llm",
+    "observability"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mirelconstantin/dsh-subagent-model.git"
+  },
+  "homepage": "https://github.com/mirelconstantin/dsh-subagent-model#readme",
+  "bugs": {
+    "url": "https://github.com/mirelconstantin/dsh-subagent-model/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.0-rc.2": "compatible"
+      }
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test scripts/unit.mjs && node scripts/check-plugin.mjs",
+    "test:unit": "node --test scripts/unit.mjs",
+    "test:composition": "node scripts/check-plugin.mjs"
+  }
+}

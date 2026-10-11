@@ -1,0 +1,16 @@
+# The working tree is LF regardless of the machine's core.autocrlf.
+#
+# Every file here is committed SOURCE, served verbatim to the browser: the Host
+# reads `src/client.js` and hands it to the page unmodified
+# (dsh-client-modules/lib/index.js:701-731). CRLF would not break that at
+# runtime, but every diff against a Linux check would show whole files as
+# changed, which is exactly the noise that hides a real change.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tgz binary

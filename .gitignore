@@ -1,0 +1,19 @@
+# Dependencies and build scratch.
+node_modules/
+coverage/
+*.tsbuildinfo
+
+# Local logs and harness state.
+*.log
+.DS_Store
+
+# NOTE: `src/` is deliberately NOT ignored, and must stay committed.
+#
+# There is no build step in this plugin: `src/index.js` and `src/client.js` are
+# the shipped artifacts, and `package.json` points `main` and `exports['./client']`
+# straight at them. A git install that ignored `src/` would produce a package with
+# nothing to load, and only in the environment where a consumer has no compiler to
+# rebuild it — which is exactly the environment a consumer has.
+#
+# Ignoring `src/` as "build output" is the natural first mistake here, and it was
+# made once; the symptom is a plugin that installs cleanly and then does nothing.
