@@ -48,8 +48,14 @@
  * `projectionsBySession`, and a loaded Session that has not made a request has
  * a `modelSelection` snapshot whose `next` is `null`. Those are different
  * facts, so the hover row renders a dictionary line for "no model yet" in the
- * second case and nothing at all in the first — `src/model.js` keeps them
+ * second case and nothing at all in the first — `src/client.model.js` keeps them
  * apart, and the header chip disappears rather than showing a stale model.
+ *
+ * WHERE THE LOGIC LIVES. The pure reading functions are NOT inlined here. They
+ * live in the sibling chunk `src/client.model.js`, fetched once by
+ * `require.async('./client.model.js')` and handed down through props, so this
+ * file and `src/model.js` (which re-exports the chunk for `node --test`) can no
+ * longer drift apart. See the block above `withModel` for the mechanism.
  *
  * Model-facing behaviour: none. Nothing here registers a tool, reads or writes
  * session state, or touches a tool result. It renders what the client store
@@ -82,7 +88,7 @@ window.__ModuleLoader__.load({
      */
     let Tag = null
     let Tooltip = null
-    let IconSparkleOutlineRegular = null
+    let IconSparkleRegular = null
     let createPortal = null
     // `react-dom` is a confirmed seed word (`dsh-client-modules/lib/client.js:548`,
     // read by the web frontend's boot entry). The tree menu portals through it,
@@ -103,8 +109,7 @@ window.__ModuleLoader__.load({
       if (primitives !== null && typeof primitives === 'object') {
         Tag = typeof primitives.Tag === 'function' ? primitives.Tag : null
         Tooltip = typeof primitives.Tooltip === 'function' ? primitives.Tooltip : null
-        IconSparkleOutlineRegular =
-          typeof primitives.IconSparkleOutlineRegular === 'function' ? primitives.IconSparkleOutlineRegular : null
+        IconSparkleRegular = typeof primitives.IconSparkleRegular === 'function' ? primitives.IconSparkleRegular : null
       }
     } catch (e) {
       // A build where the seed is absent must not take the header down with it.
@@ -112,6 +117,21 @@ window.__ModuleLoader__.load({
 
     /** Locale namespace owned by this plugin. */
     const NS = 'dsh-subagent-model'
+
+    /**
+     * The one in-flight or settled catalog load this page shares.
+     *
+     * Module-scoped on purpose: the catalog is Host-generation scoped
+     * (`dsh-client-ui-model-selection/lib/client.js:106` — "the current
+     * generation's catalog, sharing its one in-flight load"), so every chip in
+     * the page reads the same value and a second render must not spend a second
+     * round trip. `null` means "not asked yet"; a resolved `null` means "asked,
+     * and there is nothing to show", which is what keeps a missing catalog from
+     * becoming a request on every render.
+     *
+     * @type {Promise<Array<object> | null> | null}
+     */
+    let catalogPromise = null
 
     /**
      * The header seat.
@@ -138,11 +158,16 @@ window.__ModuleLoader__.load({
      * and a `list` slot keeps only the FIRST entry per `id` cell
      * (`dsh-cordis-client-runner/lib/client.js:3496-3551`;
      * `dsh-client-ui-slots/lib/index.js:221`, `:278-293`), so this outranks the
-     * shipped entry. A duplicate `id` is rejected only AT THE SAME priority
-     * (`:183-184`), so the distinct number also keeps this entry from colliding
-     * with ITSELF when the `slots.inject` reconciler re-runs the callback — a
-     * collision observed directly by the sibling `dsh-subagent-tree`, which
-     * documents the same measurement at its own `SHADOW_PRIORITY` (-9999).
+     * shipped entry.
+     *
+     * The number must be DISTINCT from every other entry claiming this cell.
+     * A duplicate `id` is rejected only AT THE SAME priority
+     * (`dsh-client-ui-slots/lib/index.js:183-184`), which is why the written
+     * value is -9998 and not the -9999 the sibling `dsh-subagent-tree` uses
+     * (`src/tree.js`): co-installed, the two would claim `subagent-catalog` at
+     * the same priority and the second `register` would throw, blanking the
+     * header. It also keeps this entry from colliding with ITSELF when the
+     * `slots.inject` reconciler re-runs the callback.
      *
      * The value sits far below anything the page-local decrementing counter can
      * produce (`allocatePriority: () => --this.nextPriority`,
@@ -150,7 +175,7 @@ window.__ModuleLoader__.load({
      * many other packages register first.
      */
     const SHADOWED_CELL_ID = 'subagent-catalog'
-    const SHADOW_PRIORITY = -9999
+    const SHADOW_PRIORITY = -9998
 
     /**
      * The sidebar hover-card seat.
@@ -258,6 +283,8 @@ window.__ModuleLoader__.load({
       'tip.unknownOnly': 'model unknown',
       'tip.inherited': '{count} inherited their parent model',
       'tip.running': '{count} running now',
+      'tip.efforts': 'Efforts: {efforts}',
+      'tip.effortDefault': '{effort} (default)',
       'row.label': 'Model',
       'row.unknown': 'No model yet',
       'row.inherited': 'Inherited from parent',
@@ -268,12 +295,25 @@ window.__ModuleLoader__.load({
       'row.steps': '{count} steps',
       'row.time': 'Active time',
       'row.tokens': 'Generated',
+      'row.cache': 'Cache',
+      'row.cacheRead': '{count} read',
+      'row.cacheWrite': '{count} written',
+      'row.context': 'Context window',
       'row.task': 'Task',
       'row.switch': 'Route change',
       'row.switchFrom': '{from} → {to}, not yet applied',
       'row.mode': 'Kind',
       'row.modeOneShot': 'one-shot, read-only',
       'row.modeContinuable': 'continuable',
+      // Per-turn route history, owned by the companion chunk
+      // src/client.route-history.js, which renders these through the
+      // conversation.chat.turnTail seat. They sit here so the two flattened
+      // dictionaries below stay the single pair this plugin owns.
+      'route.label': 'Ran on',
+      'route.title': 'This turn ran on {model}',
+      'route.switchedTitle': 'This turn ran on {model}, re-routed from {from}',
+      'route.effortDefaulted': '(adapter default)',
+      'route.switchedFrom': '(was {from})',
     }
 
     /** @type {Record<string, string>} */
@@ -312,6 +352,8 @@ window.__ModuleLoader__.load({
       'tip.unknownOnly': 'model necunoscut',
       'tip.inherited': '{count} au moștenit modelul părintelui',
       'tip.running': '{count} în execuție acum',
+      'tip.efforts': 'Eforturi: {efforts}',
+      'tip.effortDefault': '{effort} (implicit)',
       'row.label': 'Model',
       'row.unknown': 'Niciun model încă',
       'row.inherited': 'Moștenit de la părinte',
@@ -322,12 +364,25 @@ window.__ModuleLoader__.load({
       'row.steps': '{count} pași',
       'row.time': 'Timp activ',
       'row.tokens': 'Generat',
+      'row.cache': 'Cache provider',
+      'row.cacheRead': '{count} citite',
+      'row.cacheWrite': '{count} scrise',
+      'row.context': 'Fereastră de context',
       'row.task': 'Cerință',
       'row.switch': 'Schimbare de rută',
       'row.switchFrom': '{from} → {to}, încă neaplicat',
       'row.mode': 'Tip',
       'row.modeOneShot': 'one-shot, doar citire',
       'row.modeContinuable': 'continuabil',
+      // Per-turn route history, owned by the companion chunk
+      // src/client.route-history.js, which renders these through the
+      // conversation.chat.turnTail seat. They sit here so the two flattened
+      // dictionaries below stay the single pair this plugin owns.
+      'route.label': 'A rulat pe',
+      'route.title': 'Această tură a rulat pe {model}',
+      'route.switchedTitle': 'Această tură a rulat pe {model}, schimbată de la {from}',
+      'route.effortDefaulted': '(implicit din adaptor)',
+      'route.switchedFrom': '(era {from})',
     }
 
     /**
@@ -419,187 +474,72 @@ window.__ModuleLoader__.load({
     }
 
     /* ------------------------------------------------------------------ *
-     * Pure reading logic — inlined copies of `src/model.js`.
+     * The pure reading logic lives in `src/client.model.js`.
      *
-     * Behaviourally identical to that module; see its header for the projection
-     * they read. The shared module remains the tested source of truth for the
-     * Host suite; these copies exist only because a classic script cannot
-     * `import` and the Host serves exactly one file per package
-     * (`dsh-client-modules/lib/index.js:169` — `CLIENT_CHUNK =
-     * /^client\.[A-Za-z0-9][A-Za-z0-9._-]*\.js$/`, so a sibling file is not
-     * reachable at runtime).
+     * This file used to inline a third copy of it, on the belief that the Host
+     * serves exactly one file per package. It does not: `require.async` is built
+     * into the very `require` this factory receives
+     * (`dsh-client-modules/lib/client.js:707-713`), a `./file.js` specifier goes
+     * to `importChunk`, and the Host serves the sibling chunk
+     * (`dsh-client-modules/lib/index.js:915-932`, `CLIENT_CHUNK` at `:169`).
+     * Three shipped packages already ship one
+     * (`@deepseek-ai/dsh-client-ui-sidebar-terminal/lib/client.terminal.js:1`).
+     *
+     * The chunk is loaded EAGERLY, once, by {@link withModel}: `resolveRoute`,
+     * `summarizeSubagentModels`, `catalogOf` and `formatCount` are all called
+     * during render, so a `React.lazy` wrapper (the shipped terminal pattern)
+     * would suspend the chat header on a network round trip to draw a chip that
+     * is otherwise pure arithmetic over props the render already holds.
      * ------------------------------------------------------------------ */
 
     /**
-     * Shorten a model id to a compact label.
+     * The resolved chunk, or null until {@link apply} has loaded it.
      *
-     * Mirrors `shortenModel` in `src/model.js`: only the `-preview` /
-     * `-latest` suffixes are dropped, because the row the user is already
-     * reading implies them. A truncated id the user cannot map back to the
-     * model they chose would be worse than a long one.
-     *
-     * @param {string} model - Raw model id from the projection.
-     * @returns {string} The label to display, or an empty string.
+     * @type {Record<string, any> | null}
      */
-    function shortenModel(model) {
-      if (typeof model !== 'string') return ''
-      const trimmed = model.trim()
-      if (trimmed === '') return ''
-      return trimmed.replace(/-(preview|latest)$/i, '')
-    }
-
-    /** Projection keys, inlined so the two files cannot drift. @type {string} */
-    const PROJECTION_KEY = 'modelSelection'
-    const IDENTITY_KEY = 'subagent'
-    /** Bounded parent walk for an inherited route. @type {number} */
-    const MAX_PARENT_HOPS = 16
+    let modelChunk = null
 
     /**
-     * Read one `{ model, reasoningEffort }` pair, tolerating a missing value.
+     * Hand the chunk's exports down to a component, or render nothing.
      *
-     * Mirrors `readRoute` in `src/model.js`.
+     * Every consumer here is a React component that reads these functions DURING
+     * render, so a component cannot be given them until the chunk has resolved.
+     * A still-unloaded chunk therefore renders null rather than throwing, which
+     * is what keeps a failed fetch from taking the conversation header down; the
+     * chip reappears on the next render once {@link withModel} publishes the real
+     * exports.
      *
-     * @param {any} selection - A `modelSelection` route record.
-     * @returns {{model: string, effort: string}} Both fields, empty when unset.
+     * @param {function(function(any): any): any} Component - The wrapped component.
+     * @returns {function(object): any} A component that reads the chunk's exports.
      */
-    function readRoute(selection) {
-      if (selection === null || selection === undefined || typeof selection !== 'object') {
-        return { model: '', effort: '' }
+    function withModel(Component) {
+      return function ModelProps(props) {
+        if (modelChunk === null) return null
+        return h(Component, { ...props, m: modelChunk })
       }
-      const effort = typeof selection.reasoningEffort === 'string' ? selection.reasoningEffort.trim() : ''
-      return { model: shortenModel(selection.model), effort }
-    }
-
-    /**
-     * Read the durable route from a child's `subagent` identity projection.
-     *
-     * Mirrors `childRouteOf` in `src/model.js`. A continuable descriptor
-     * snapshots `agentProvider` / `agentModel` / `agentReasoningEffort`
-     * (`dsh-subagent/lib/types/descriptor.js:38-45`); a one-shot descriptor
-     * omits the route entirely (`:37`, `:118-126`), so a one-shot child's
-     * explicit model is not durable and is reported as inherited rather than
-     * guessed at.
-     *
-     * @param {any} identity - One `subagent` projection value, or undefined.
-     * @returns {{model: string, effort: string, pending: boolean, source: string}} The route.
-     */
-    function childRouteOf(identity) {
-      if (identity === null || identity === undefined || typeof identity !== 'object') {
-        return { model: '', effort: '', pending: false, source: 'none', switchedFrom: '' }
-      }
-      const effort = typeof identity.agentReasoningEffort === 'string' ? identity.agentReasoningEffort.trim() : ''
-      const model = shortenModel(identity.agentModel)
-      if (model !== '') return { model, effort, pending: false, source: 'descriptor', switchedFrom: '' }
-      return { model: '', effort, pending: false, source: identity.mode === 'one-shot' ? 'inherited' : 'none', switchedFrom: '' }
-    }
-
-    /**
-     * Read the route out of one snapshot, whichever shape it has.
-     *
-     * Mirrors `readProjection` in `src/model.js`. A resident snapshot carries
-     * its values under `values`; a list-row attachment carries them directly on
-     * `projectionValues`, so `source?.values ?? source` serves both stores
-     * without the caller knowing which one it holds.
-     *
-     * @param {any} source - A `projectionsBySession` value or a `projectionValues` object.
-     * @returns {{model: string, effort: string, pending: boolean, source: string}} The route.
-     */
-    function readProjection(source) {
-      const values = source?.values ?? source
-      if (values === null || values === undefined) return { model: '', effort: '', pending: false, source: 'none', switchedFrom: '' }
-      const selection = values[PROJECTION_KEY]
-      if (selection !== null && selection !== undefined) {
-        const route = readRoute(selection.next)
-        const lastUsed = readRoute(selection.lastUsed)
-        const pending = route.model !== '' && lastUsed.model !== '' && route.model !== lastUsed.model
-        // An explicit effort rides the pending route; otherwise keep the used
-        // one so a queued model that has not declared an effort still shows the
-        // effort currently in force.
-        const effort = route.effort !== '' ? route.effort : lastUsed.effort
-        return { model: route.model, effort, pending, source: 'selection', switchedFrom: pending ? lastUsed.model : '' }
-      }
-      // No selection projection at all: a child that never made a request falls
-      // here, and its durable descriptor is the only remaining evidence.
-      return childRouteOf(values[IDENTITY_KEY])
-    }
-
-    /**
-     * Whether a session id is present in the loaded-projection map.
-     *
-     * Mirrors `isLoaded` in `src/model.js`: absent means "not looked at yet",
-     * which is not the same fact as "no model".
-     *
-     * @param {Record<string, any>} projectionsBySession - Store map.
-     * @param {string} sessionId - Session id to test.
-     * @returns {boolean} Whether the session has its own snapshot.
-     */
-    function isLoaded(projectionsBySession, sessionId) {
-      if (projectionsBySession === null || typeof projectionsBySession !== 'object') return false
-      if (typeof sessionId !== 'string' || sessionId === '') return false
-      return Object.prototype.hasOwnProperty.call(projectionsBySession, sessionId)
-    }
-
-    /**
-     * Whether a snapshot's model is a queued switch rather than the running one.
-     *
-     * Mirrors `isPending` in `src/model.js`: `next` already prefers the pending
-     * selection, so `next.model !== lastUsed.model` means the user has picked a
-     * different model than the last request used. A snapshot with no request at
-     * all (`lastUsed` null) is NOT pending — there is no earlier model to switch
-     * away from.
-     *
-     * @param {any} snapshot - One `projectionsBySession` value, or undefined.
-     * @returns {boolean} Whether the queued selection differs from the last-used route.
-     */
-    function isPending(snapshot) {
-      const values = snapshot?.values ?? snapshot
-      if (values === null || values === undefined) return false
-      const selection = values[PROJECTION_KEY]
-      if (selection === null || selection === undefined) return false
-      if (selection.next === null || selection.next === undefined) return false
-      if (selection.lastUsed === null || selection.lastUsed === undefined) return false
-      return shortenModel(selection.next.model) !== shortenModel(selection.lastUsed.model)
-    }
-
-    /**
-     * Resolve one session's route from EITHER store.
-     *
-     * Mirrors `resolveModel` in `src/model.js`, and is the whole reason a
-     * subagent now shows a model. `projectionsBySession` only holds sessions
-     * whose projection store is RESIDENT in the client
-     * (`dsh-api-session-controller/lib/client.js:2525` `projectionStore()`), so
-     * a subagent the user never opened is absent from it — which is exactly what
-     * made the chip appear on ordinary conversations and nowhere else.
-     *
-     * The list rows carry the same values under `byId[id].projectionValues`
-     * (`:2942`, `:3521`, `:3549`), and their rows are synthesized from the
-     * parent's `subagentCatalog` projection (`:3518-3542`) — so that is the
-     * source covering a listed-but-never-opened child.
-     *
-     * @param {Record<string, any>} projectionsBySession - `state.projectionsBySession`.
-     * @param {Record<string, any>} byId - `state.byId`.
-     * @param {string} sessionId - Session whose route is requested.
-     * @returns {{loaded: boolean, model: string, effort: string, pending: boolean, source: string}} The route.
-     */
-    function resolveModel(projectionsBySession, byId, sessionId) {
-      if (isLoaded(projectionsBySession, sessionId)) {
-        const route = readProjection(projectionsBySession[sessionId])
-        return { ...route, loaded: true }
-      }
-      const attached = byId?.[sessionId]?.projectionValues
-      if (attached === null || attached === undefined) {
-        return { loaded: false, model: '', effort: '', pending: false, source: 'none', switchedFrom: '' }
-      }
-      // The row is known to the list even though its projection store is not
-      // resident, so the session IS a fact — its projections are simply
-      // attached to the row rather than to a store of its own.
-      const route = readProjection(attached)
-      return { ...route, loaded: true }
     }
 
     /* ------------------------------------------------------------------ *
      * Components.
      * ------------------------------------------------------------------ */
+
+    /**
+     * The summary a render that will draw no trigger gets.
+     *
+     * Shared and frozen so the guard in {@link SubagentModelTree} can skip the
+     * walk without allocating: the tooltip thunk reads `groups`, `running`,
+     * `total` and `byDepth` off it, and a fresh object per render would defeat
+     * the memo that is meant to be doing the skipping.
+     * @type {{groups: Array<object>, total: number, distinct: number, inherited: number, running: number, byDepth: Array<object>}}
+     */
+    const EMPTY_SUMMARY = Object.freeze({
+      groups: Object.freeze([]),
+      total: 0,
+      distinct: 0,
+      inherited: 0,
+      running: 0,
+      byDepth: Object.freeze([]),
+    })
 
     /**
      * The header chip for the ACTIVE session.
@@ -617,25 +557,53 @@ window.__ModuleLoader__.load({
      * effort set nothing is added, which keeps the chip compact for the common
      * case.
      *
-     * @param {object} props - Session standard props plus the bound `t`.
+     * @param {object} props - Session standard props, the bound `t`, and the chunk's exports as `m`.
      * @returns {object} React element, or null when there is nothing to show.
      */
     function ModelChip(props) {
-      const { sessionId, useSessions, t } = props
+      const { sessionId, useSessions, loadCatalog, t, m } = props
 
       const readSessions = asHook(useSessions)
 
       const projections = readSessions((state) => state.projectionsBySession)
       const byId = readSessions((state) => state.byId)
 
-      const route = resolveRoute(projections, byId, sessionId)
-      if (!route.loaded || route.model === '') return null
+      const route = m.resolveRoute(projections, byId, sessionId)
+
+      // THE CATALOG, fetched once for the page and read lazily. It lands in
+      // state rather than a ref because the tooltip is a THUNK: a ref would be
+      // invisible to React, so the chip would keep showing the un-enriched
+      // bubble for as long as it stayed mounted.
+      //
+      // `undefined` is the sentinel for "not asked yet" and the guard below is
+      // the only thing that reads it. It must NOT be `null`: a catalog that
+      // failed settles to `null`, and an equality guard against the initial
+      // value alone would then re-request on every commit.
+      const [groups, setGroups] = React.useState(undefined)
+      React.useEffect(() => {
+        if (groups !== undefined || loadCatalog === null || loadCatalog === undefined) return undefined
+        let live = true
+        loadCatalogOnce(loadCatalog).then((loaded) => {
+          if (live) setGroups(loaded)
+        })
+        return () => { live = false }
+      }, [groups, loadCatalog])
 
       // The tooltip carries what the chip itself cannot: which models this
       // session actually delegated to, so a run with five subagents reads
       // "3× deepseek-chat, 2× deepseek-reasoner" instead of forcing the user to
       // open each one. Only computed for a session that HAS subagents, and only
       // when the bubble is open, so an ordinary request pays nothing.
+      //
+      // Memoized, and placed BEFORE the early return below rather than inside
+      // the thunk: `useMemo` after a conditional return changes the hook count
+      // when the session's own state flips (`route.loaded` becomes true once the
+      // session loads), and a memo inside the thunk cannot run at all without
+      // breaking the rules of hooks.
+      const summary = (0, React.useMemo)(() => m.summarizeSubagentModels(projections, byId, sessionId), [projections, byId, sessionId])
+
+      if (!route.loaded || route.model === '') return null
+
       const tooltipLabel = () => {
         const lines = []
         const headline = route.source === 'inherited'
@@ -644,10 +612,24 @@ window.__ModuleLoader__.load({
             ? t('chip.titleWithEffort', { model: route.model, effort: route.effort })
             : t('chip.title', { model: route.model })
         lines.push(headline)
-        const summary = summarizeSubagentModels(projections, byId, sessionId)
+        // What THIS model can be run at, from the live catalog. The chip states
+        // the effort in force; this says which efforts exist, so a user can see
+        // whether the one in use is the widest or the narrowest without opening
+        // the model picker. It is a lazy state read inside an already-lazy
+        // thunk: the Remote call starts on the first hover, and only when a
+        // catalog has actually been fetched — `null` is the cached answer for a
+        // chip whose model the catalog does not list, which is normal and silent.
+        const catalogReasoning = catalogReasoningOf(groups, route.model)
+        if (catalogReasoning !== null) {
+          const defaultEffort = catalogReasoning.defaultEffort
+          const listed = catalogReasoning.efforts
+            .map((effort) => (effort.name === defaultEffort ? t('tip.effortDefault', { effort: effort.name }) : effort.name))
+            .join(', ')
+          lines.push(t('tip.efforts', { efforts: listed === '' ? t('tip.unknownOnly') : listed }))
+        }
         if (summary.total > 0 && summary.groups.length > 0) {
-          lines.push(t('tip.summary', { count: formatCount(summary.total) }))
-          for (const group of summary.groups) lines.push(`  ${formatModelGroup(group)}`)
+          lines.push(t('tip.summary', { count: m.formatCount(summary.total) }))
+          for (const group of summary.groups) lines.push(`  ${m.formatModelGroup(group)}`)
           // The per-depth cut is the integration with the sibling
           // `dsh-subagent-tree`, which already counts the same descendants: both
           // facts are about one walk, so they read in one place. It is printed
@@ -658,15 +640,15 @@ window.__ModuleLoader__.load({
           if (splits) {
             lines.push(t('tip.byDepth'))
             for (const level of deeper) {
-              const models = level.groups.map(formatModelGroup).join(', ')
-              lines.push(`  ${t('tip.depth', { depth: formatCount(level.depth) })}${models === '' ? ` ${t('tip.unknownOnly')}` : `: ${models}`}`)
+              const models = level.groups.map(m.formatModelGroup).join(', ')
+              lines.push(`  ${t('tip.depth', { depth: m.formatCount(level.depth) })}${models === '' ? ` ${t('tip.unknownOnly')}` : `: ${models}`}`)
             }
           }
           if (summary.inherited > 0) {
-            lines.push(t('tip.inherited', { count: formatCount(summary.inherited) }))
+            lines.push(t('tip.inherited', { count: m.formatCount(summary.inherited) }))
           }
           if (summary.running > 0) {
-            lines.push(t('tip.running', { count: formatCount(summary.running) }))
+            lines.push(t('tip.running', { count: m.formatCount(summary.running) }))
           }
         }
         return lines.join('\n')
@@ -676,7 +658,7 @@ window.__ModuleLoader__.load({
       const chip = h(
         'span',
         { className: 'dsh-smr-chip' },
-        IconSparkleOutlineRegular !== null ? h(IconSparkleOutlineRegular, { size: 14 }) : null,
+        IconSparkleRegular !== null ? h(IconSparkleRegular, { size: 14 }) : null,
         h('span', { className: 'dsh-smr-chipPrefix' }, `${t('chip.prefix')}:`),
         modelText,
         route.effort !== ''
@@ -735,17 +717,17 @@ window.__ModuleLoader__.load({
      * Renders nothing for a session neither store knows — its model is unknown,
      * not absent, and an empty row would read as a fact.
      *
-     * @param {object} props - Owner `sessionId`, standard props, and the bound `t`.
+     * @param {object} props - Owner `sessionId`, standard props, the bound `t`, and the chunk's exports as `m`.
      * @returns {object} React element, or null when there is nothing to show.
      */
     function ModelHoverRow(props) {
-      const { sessionId, useSessions, t } = props
+      const { sessionId, useSessions, t, m } = props
 
       const readSessions = asHook(useSessions)
       const projections = readSessions((state) => state.projectionsBySession)
       const byId = readSessions((state) => state.byId)
 
-      const route = resolveRoute(projections, byId, sessionId)
+      const route = m.resolveRoute(projections, byId, sessionId)
       if (!route.loaded) return null
 
       // A durable-but-never-run child whose route was inherited now resolves
@@ -778,16 +760,16 @@ window.__ModuleLoader__.load({
       // neither is registered in every assembly, so each row appears only when
       // its value is actually present rather than showing a zero that reads as
       // "this session did nothing".
-      const values = projectionsByValues(projections, byId, sessionId)
-      const identity = values[IDENTITY_KEY]
+      const values = projectionsByValues(projections, byId, sessionId, m)
+      const identity = values[m.IDENTITY_KEY]
       const isSubagent = byId?.[sessionId]?.origin === 'subagent'
       const mode = identity?.mode
 
       const stats = values.sessionStats
       if (stats !== null && stats !== undefined && typeof stats === 'object') {
         const facts = []
-        if (typeof stats.turns === 'number' && stats.turns > 0) facts.push(t('row.turns', { count: formatCount(stats.turns) }))
-        if (typeof stats.steps === 'number' && stats.steps > 0) facts.push(t('row.steps', { count: formatCount(stats.steps) }))
+        if (typeof stats.turns === 'number' && stats.turns > 0) facts.push(t('row.turns', { count: m.formatCount(stats.turns) }))
+        if (typeof stats.steps === 'number' && stats.steps > 0) facts.push(t('row.steps', { count: m.formatCount(stats.steps) }))
         if (facts.length > 0) rows.push(factRow(t('row.activity'), facts.join(' · ')))
       }
 
@@ -797,7 +779,40 @@ window.__ModuleLoader__.load({
       }
 
       if (typeof stats?.decodeTokens === 'number' && stats.decodeTokens > 0) {
-        rows.push(factRow(t('row.tokens'), formatCount(stats.decodeTokens)))
+        rows.push(factRow(t('row.tokens'), m.formatCount(stats.decodeTokens)))
+      }
+
+      // PROMPT-SIDE CACHE TRAFFIC, from the `tokenUsage` projection, whose view
+      // is the four durable buckets
+      // (`dsh-token-meter/lib/types/usage-projection.js:118` —
+      // `view: state => state.totals`, schema `:30-35`). It is a different
+      // counter from the `sessionStats.decodeTokens` above: those are DECODED
+      // tokens, these are the prompt tokens the provider served from and wrote
+      // to its cache, which is the number that explains a bill. Rendered only
+      // for a bucket that actually moved — a provider that reported no cache
+      // traffic has `0`, and a zero there would read as "nothing cached" rather
+      // than as "never asked".
+      const usage = values.tokenUsage
+      if (usage !== null && usage !== undefined && typeof usage === 'object') {
+        const cached = []
+        if (typeof usage.cacheReadTokens === 'number' && usage.cacheReadTokens > 0) {
+          cached.push(t('row.cacheRead', { count: m.formatCount(usage.cacheReadTokens) }))
+        }
+        if (typeof usage.cacheWriteTokens === 'number' && usage.cacheWriteTokens > 0) {
+          cached.push(t('row.cacheWrite', { count: m.formatCount(usage.cacheWriteTokens) }))
+        }
+        if (cached.length > 0) rows.push(factRow(t('row.cache'), cached.join(' · ')))
+      }
+
+      // HOW BIG THE WINDOW THIS SESSION HAS, from the `contextPressure`
+      // projection. Its view is `{contextWindow?, pressureTokens?,
+      // projectedTokens?}` (`dsh-token-meter/lib/types/usage-projection.js:48-56`,
+      // published at `:180-186`), and only `request/context` ever supplies the
+      // denominator — so a session whose provider never reported one shows no
+      // row rather than a fabricated capacity.
+      const contextWindow = values.contextPressure?.contextWindow
+      if (typeof contextWindow === 'number' && contextWindow > 0) {
+        rows.push(factRow(t('row.context'), m.formatCount(contextWindow)))
       }
 
       // A route switch the session has NOT yet made. `modelSelection.next`
@@ -854,10 +869,11 @@ window.__ModuleLoader__.load({
      * @param {Record<string, any>} projectionsBySession - `state.projectionsBySession`.
      * @param {Record<string, any>} byId - `state.byId`.
      * @param {string} sessionId - Session whose values are requested.
+     * @param {Record<string, any>} m - The chunk's exports.
      * @returns {Record<string, any>} The values, or an empty object.
      */
-    function projectionsByValues(projectionsBySession, byId, sessionId) {
-      if (isLoaded(projectionsBySession, sessionId)) {
+    function projectionsByValues(projectionsBySession, byId, sessionId, m) {
+      if (m.isLoaded(projectionsBySession, sessionId)) {
         return projectionsBySession[sessionId]?.values ?? {}
       }
       const attached = byId?.[sessionId]?.projectionValues
@@ -888,205 +904,6 @@ window.__ModuleLoader__.load({
       return `${seconds}s`
     }
 
-    /**
-     * Resolve one session's route by following parent links when it inherited it.
-     *
-     * Mirrors `resolveRoute` in `src/model.js`. A child whose descriptor records
-     * no route of its own runs its parent's
-     * (`dsh-tool-subagent/README.md:67` — with `modelSelectionSettings` off, the
-     * default, every child inherits). That route is not in the child's own log,
-     * so it is recovered by walking `parentId` up the lineage, which is what
-     * makes an opened subagent's header say which model it actually ran on
-     * rather than nothing at all.
-     *
-     * The walk is bounded and cycle-safe, and reports `inherited` with the
-     * ancestor id rather than presenting the parent's route as the child's own
-     * choice.
-     *
-     * @param {Record<string, any>} projectionsBySession - `state.projectionsBySession`.
-     * @param {Record<string, any>} byId - `state.byId`, whose rows carry `parentId`.
-     * @param {string} sessionId - Session whose effective route is requested.
-     * @returns {{loaded: boolean, model: string, effort: string, pending: boolean, source: string, inheritedFrom?: string}} The route.
-     */
-    function resolveRoute(projectionsBySession, byId, sessionId) {
-      const own = resolveModel(projectionsBySession, byId, sessionId)
-      // A route the session owns — selected, used, or durable in its descriptor
-      // — is always the answer; nothing is inherited while one exists.
-      if (own.source !== 'inherited') return own
-
-      const visited = new Set([sessionId])
-      let cursor = byId === null || byId === undefined ? undefined : byId[sessionId]
-      for (let hops = 0; hops < MAX_PARENT_HOPS; hops += 1) {
-        const parentId = cursor?.parentId
-        if (typeof parentId !== 'string' || parentId === '' || visited.has(parentId)) break
-        visited.add(parentId)
-        const parent = resolveModel(projectionsBySession, byId, parentId)
-        if (parent.source !== 'inherited' && parent.model !== '') {
-          return { ...parent, source: 'inherited', inheritedFrom: parentId }
-        }
-        cursor = byId === null || byId === undefined ? undefined : byId[parentId]
-      }
-      // No ancestor records an explicit route either, so the honest answer is
-      // that the route was inherited and is unknown from durable data.
-      return { ...own, model: '', effort: own.effort }
-    }
-
-    /**
-     * Format a count for display inside a locale-owned label.
-     *
-     * @param {number} count - The count to render.
-     * @returns {string} A decimal rendering, or an empty string when not finite.
-     */
-    function formatCount(count) {
-      if (typeof count !== 'number' || !Number.isFinite(count)) return ''
-      return String(Math.trunc(count))
-    }
-
-    /**
-     * One session's direct-children catalog, or undefined when not loaded.
-     *
-     * Mirrors `catalogOf` in `src/model.js`. A loaded leaf is present with an
-     * EMPTY array, which is a different fact from a session that has never been
-     * touched — `dsh-subagent-tree` draws the same line at `src/tree.js:40-43`.
-     *
-     * @param {Record<string, any>} projectionsBySession - Store map.
-     * @param {string} sessionId - Parent whose catalog is requested.
-     * @returns {Array<object> | undefined} The entries, or undefined.
-     */
-    function catalogOf(projectionsBySession, sessionId) {
-      const entries = projectionsBySession?.[sessionId]?.values?.subagentCatalog
-      return Array.isArray(entries) ? entries : undefined
-    }
-
-    /**
-     * Render one summary fragment: "3× deepseek-chat (high)".
-     *
-     * Mirrors `formatModelGroup` in `src/model.js`. The multiplication sign is
-     * spelled `×` so the fragment reads the same in every locale.
-     *
-     * @param {{model: string, effort: string, count: number}} group - One group.
-     * @returns {string} The fragment.
-     */
-    function formatModelGroup(group) {
-      const label = group.effort === '' ? group.model : `${group.model} (${group.effort})`
-      return `${group.count}× ${label}`
-    }
-
-    /**
-     * Group one session's subagents by the model each actually runs on.
-     *
-     * Mirrors `summarizeSubagentModels` in `src/model.js`: a breadth-first walk
-     * of `subagentCatalog` (the snapshot key is each entry's parent, exactly as
-     * the shipped component walks it at
-     * `dsh-client-ui-subagent/lib/client.js:624`), resolving every descendant
-     * through `resolveRoute` so a child's own — or inherited — model is the
-     * grouping key. Groups are ordered by descending count, then first
-     * appearance, so the dominant model leads and ties stay stable.
-     *
-     * @param {Record<string, any>} projectionsBySession - `state.projectionsBySession`.
-     * @param {Record<string, any>} byId - `state.byId`.
-     * @param {string} rootId - Session whose subagents are grouped.
-     * @returns {{groups: Array<object>, total: number, distinct: number, inherited: number, running: number}} The summary.
-     */
-    function summarizeSubagentModels(projectionsBySession, byId, rootId) {
-      const rows = []
-      const seen = new Set([rootId])
-      const queue = [{ id: rootId, depth: 0 }]
-
-      while (queue.length > 0) {
-        const { id, depth } = queue.shift()
-        const entries = catalogOf(projectionsBySession, id)
-        if (entries === undefined) continue
-        for (const entry of entries) {
-          if (entry === null || typeof entry !== 'object' || seen.has(entry.id)) continue
-          seen.add(entry.id)
-          const route = resolveRoute(projectionsBySession, byId, entry.id)
-          const running = byId?.[entry.id]?.running === true
-          rows.push({ id: entry.id, depth: depth + 1, route, running })
-          queue.push({ id: entry.id, depth: depth + 1 })
-        }
-      }
-
-      const levels = groupRows(rows)
-
-      return {
-        groups: levels.all,
-        total: rows.length,
-        distinct: levels.all.length,
-        inherited: rows.reduce((sum, row) => sum + (row.route.source === 'inherited' ? 1 : 0), 0),
-        running: rows.reduce((sum, row) => sum + (row.running ? 1 : 0), 0),
-        byDepth: levels.byDepth,
-      }
-    }
-
-    /**
-     * Cut grouped rows into the whole set and one bucket per depth.
-     *
-     * Mirrors `groupRows` in `src/model.js`. The per-depth buckets answer "is the
-     * DEEPER delegation the one that changed model", which a flat total cannot:
-     * two runs can share a total and differ entirely in which generation
-     * switched. An empty depth is omitted rather than shown as zero, and each
-     * bucket's `total` counts every descendant at that depth — including ones
-     * with no readable route — so a depth where several models are unknown still
-     * says how many rows it is talking about.
-     *
-     * @param {Array<object>} rows - Walked descendants with `route`, `running`, `depth`.
-     * @returns {{all: Array<object>, byDepth: Array<object>}} The flat and per-depth groupings.
-     */
-    function groupRows(rows) {
-      const buckets = new Map()
-      for (const row of rows) {
-        let bucket = buckets.get(row.depth)
-        if (bucket === undefined) {
-          bucket = []
-          buckets.set(row.depth, bucket)
-        }
-        bucket.push(row)
-      }
-
-      const byDepth = []
-      for (const depth of [...buckets.keys()].sort((left, right) => left - right)) {
-        const bucket = buckets.get(depth)
-        byDepth.push({ depth, total: bucket.length, groups: orderGroups(bucket) })
-      }
-
-      return { all: orderGroups(rows), byDepth }
-    }
-
-    /**
-     * Group rows by model+effort, ordered by descending count then first appearance.
-     *
-     * Mirrors `orderGroups` in `src/model.js`. A row with no readable model is
-     * not a group, which keeps the summary about models rather than unresolved
-     * rows.
-     *
-     * @param {Array<object>} rows - Rows carrying `route` and `running`.
-     * @returns {Array<object>} The groups.
-     */
-    function orderGroups(rows) {
-      const byKey = new Map()
-      const order = []
-      for (const row of rows) {
-        if (row.route.model === '') continue
-        const key = `${row.route.model}\u0000${row.route.effort}`
-        let group = byKey.get(key)
-        if (group === undefined) {
-          group = { model: row.route.model, effort: row.route.effort, count: 0, running: 0 }
-          byKey.set(key, group)
-          order.push(key)
-        }
-        group.count += 1
-        if (row.running) group.running += 1
-      }
-
-      const groups = order.map((key) => byKey.get(key))
-      const rank = new Map(order.map((key, index) => [key, index]))
-      groups.sort((left, right) => {
-        if (right.count !== left.count) return right.count - left.count
-        return rank.get(`${left.model}\u0000${left.effort}`) - rank.get(`${right.model}\u0000${right.effort}`)
-      })
-      return groups
-    }
 
     /**
      * One model's marker inside a tree row.
@@ -1134,8 +951,20 @@ window.__ModuleLoader__.load({
      *
      * Mirrors the shipped `CatalogRows` (`dsh-client-ui-subagent/lib/client.js:164`)
      * — including its disclosure triangle, activity dot, token and duration
-     * metrics, sidebar button, error row and refresh — with one addition per
-     * row: the route marker from {@link routeMarker}.
+     * metrics, sidebar button, error row and refresh — with two additions per
+     * row: the route marker from {@link routeMarker}, and the row's part in
+     * roving focus.
+     *
+     * Roving focus is why this component carries no focus state of its own. The
+     * widget is ONE tab stop: `rowIds` is the drawn rows in visual order and
+     * `activeRowId` names the row holding it, both computed once by
+     * {@link SubagentModelTree} and threaded down through `props`. A row that is
+     * not the active one renders `tabIndex: -1`, so Shift+Tab out of the menu
+     * leaves rather than walking every row. Arrow keys and Home/End pick a new
+     * `activeRowId` by index in `rowIds`; the movement itself is the effect in
+     * {@link SubagentModelTree}, which owns the menu's DOM node and can move
+     * real focus there. `Enter` and `Space` open the row, `ArrowRight`/`ArrowLeft`
+     * expand and collapse, unchanged.
      *
      * @param {object} props - The recursion's own props.
      * @returns {object} A React fragment holding this level's rows.
@@ -1143,7 +972,8 @@ window.__ModuleLoader__.load({
     function SubagentTreeRows(props) {
       const {
         parentSessionId, currentSessionId, catalogs, summaries, expanded, level,
-        projections, byId, openChild, openChildAside, refreshProjection, toggleBranch, t,
+        projections, byId, rowIds, activeRowId, setActiveRow,
+        openChild, openChildAside, refreshProjection, toggleBranch, t, m,
       } = props
 
       const catalog = catalogs[parentSessionId]
@@ -1180,8 +1010,8 @@ window.__ModuleLoader__.load({
           const activity = entry.activity === 'running' ? t('chip.actRunning') : completed ? t('chip.actCompleted') : t('chip.actInactive')
           const secondary = [summary?.title, mode, activity].filter((value) => value !== undefined).join(' · ')
 
-          const route = resolveRoute(projections, byId, entry.id)
-          const parentRoute = resolveRoute(projections, byId, parentSessionId)
+          const route = m.resolveRoute(projections, byId, entry.id)
+          const parentRoute = m.resolveRoute(projections, byId, parentSessionId)
           const marker = routeMarker({ route, parentModel: parentRoute.model }, entry.id, t)
 
           const open = () => {
@@ -1202,8 +1032,23 @@ window.__ModuleLoader__.load({
               event.preventDefault()
               event.stopPropagation()
               toggleBranch(entry.id)
+            } else {
+              const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0
+              let target = null
+              if (step !== 0) target = rowIds[rowIds.indexOf(entry.id) + step]
+              else if (event.key === 'Home') target = rowIds[0]
+              else if (event.key === 'End') target = rowIds[rowIds.length - 1]
+              if (target !== null && target !== undefined) {
+                event.preventDefault()
+                event.stopPropagation()
+                setActiveRow(target)
+              }
             }
           }
+          // A click is a selection, so it moves the roving tab stop with it —
+          // otherwise the next Tab would return focus to a row the user just
+          // left.
+          const activate = () => setActiveRow(entry.id)
           const toggle = (event) => {
             event.preventDefault()
             event.stopPropagation()
@@ -1217,13 +1062,23 @@ window.__ModuleLoader__.load({
               'div',
               {
                 role: 'treeitem',
-                tabIndex: 0,
+                // Stable per row so the arrow keys can FIND the element they
+                // must move focus to, from the menu's own DOM rather than from a
+                // ref map this file would otherwise have to thread through the
+                // recursion.
+                id: rowDomId(entry.id),
+                'data-treeitem': entry.id,
+                tabIndex: entry.id === activeRowId ? 0 : -1,
                 'aria-level': level,
+                'aria-selected': entry.id === activeRowId,
                 'aria-current': isCurrent || undefined,
                 'aria-label': [label, secondary].filter((value) => value !== '').join(' '),
                 ...(knownLeaf ? {} : { 'aria-expanded': isExpanded }),
                 className: 'dsh-smt-row',
-                onClick: open,
+                onClick: (event) => {
+                  activate()
+                  open(event)
+                },
                 onKeyDown: handleKey,
               },
               knownLeaf
@@ -1302,6 +1157,49 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * The rows the menu actually draws, in the order it draws them.
+     *
+     * `SubagentTreeRows` recurses depth-first and draws each level's entries in
+     * catalog order, so this sequence is both the visual order and the order
+     * `querySelectorAll` reports. It exists because a row needs its own position
+     * in that sequence at RENDER time — the roving `tabIndex` is one tabbable
+     * row, and it is whichever row holds that position — and the recursion
+     * cannot hand it out without either a render-time counter or this walk.
+     *
+     * @param {Record<string, any>} catalogs - Loaded catalog per session id.
+     * @param {Set<string>} expanded - Expanded branch ids.
+     * @param {string} parentSessionId - The session whose children the menu roots at.
+     * @returns {Array<string>} Drawn row session ids, in visual order.
+     */
+    function visibleRowIds(catalogs, expanded, parentSessionId) {
+      const ids = []
+      const walk = (parentId) => {
+        const catalog = catalogs[parentId]
+        if (catalog === undefined) return
+        for (const entry of catalog.entries) {
+          ids.push(entry.id)
+          if (expanded.has(entry.id) && !isKnownLeaf(catalogs[entry.id])) walk(entry.id)
+        }
+      }
+      walk(parentSessionId)
+      return ids
+    }
+
+    /**
+     * The DOM id one tree row is addressable by.
+     *
+     * Session ids are opaque strings, so they cannot go into a selector unquoted;
+     * the menu instead looks its rows up by `data-treeitem`, and this id exists
+     * so assistive technology has a real element id to anchor to.
+     *
+     * @param {string} id - Child session id.
+     * @returns {string} The row's DOM id.
+     */
+    function rowDomId(id) {
+      return `dsh-smt-row-${String(id)}`
+    }
+
+    /**
      * The trigger-plus-tree dropdown that replaces the shipped catalog pill.
      *
      * This half claims the `subagent-catalog` CELL of
@@ -1318,7 +1216,7 @@ window.__ModuleLoader__.load({
      * @returns {object} React element, or null on a session with no subagents.
      */
     function SubagentModelTree(props) {
-      const { sessionId, useSessions, useSessionStatus, openChild, openChildAside, refreshProjection, t } = props
+      const { sessionId, useSessions, useSessionStatus, openChild, openChildAside, refreshProjection, t, m } = props
 
       const readSessions = asHook(useSessions)
       const readStatus = asHook(useSessionStatus)
@@ -1356,6 +1254,12 @@ window.__ModuleLoader__.load({
       const menuRef = React.useRef(null)
       const [menuPosition, setMenuPosition] = React.useState()
 
+      // ROVING FOCUS. `role: "tree"` is only honest when the rows can actually
+      // be walked: the WAI-ARIA tree pattern makes the WIDGET a single tab stop
+      // and moves DOM focus with the arrow keys. `activeId` names the row that
+      // holds it, which is the only one given `tabIndex: 0`.
+      const [activeId, setActiveId] = React.useState(null)
+
       const toggleBranch = React.useCallback((childSessionId) => {
         setExpanded((current) => {
           const next = new Set(current)
@@ -1367,6 +1271,21 @@ window.__ModuleLoader__.load({
           return next
         })
       }, [refreshProjection])
+
+      // Menu-open and catalog-change both strand `activeId` on a row that is no
+      // longer drawn, which would leave the widget with no tabbable row at all.
+      // Re-anchor on the first drawn row whenever the active one is gone.
+      const rowIds = visibleRowIds(catalogs, expanded, sessionId)
+      const activeRowId = activeId !== null && rowIds.includes(activeId) ? activeId : (rowIds[0] ?? null)
+
+      // Focus has to wait for the row the state change re-renders, so it rides
+      // the commit rather than the key event. The id is the dependency on
+      // purpose: re-running this on every render would steal focus back from
+      // whatever inside the row the user clicked.
+      React.useEffect(() => {
+        if (open === false || activeRowId === null) return
+        menuRef.current?.querySelector('[data-treeitem="' + activeRowId + '"]')?.focus()
+      }, [open, activeRowId])
 
       // Menus close on an outside pointer, exactly as the shipped dropdown does
       // (`dsh-client-ui-subagent/lib/client.js:457-466`).
@@ -1400,27 +1319,49 @@ window.__ModuleLoader__.load({
         window.addEventListener('scroll', placeMenu, true)
         return () => {
           window.removeEventListener('resize', placeMenu)
-          document.removeEventListener('scroll', placeMenu, true)
+          window.removeEventListener('scroll', placeMenu, true)
         }
       }, [open])
 
-      // The model summary rides in the trigger's tooltip, so the headline stays
-      // the count the shipped pill always showed.
-      const summary = summarizeSubagentModels(projections, byId, sessionId)
       const directCount = catalog?.entries.length ?? 0
       const runningCount = catalog?.entries.filter((entry) => entry.activity === 'running').length ?? 0
 
+      // Whether this header will render a trigger at all — the guard the walk
+      // has to respect. A subagent's own header is the case that makes it worth
+      // respecting: it can have a populated catalog of its own, so an unguarded
+      // walk would resolve a route for every one of its descendants and then
+      // render nothing at all.
+      const wanted = !isChild && catalog !== undefined && directCount > 0
+
+      // The model summary rides in the trigger's tooltip, so the headline stays
+      // the count the shipped pill always showed. Keyed on the three real
+      // inputs plus the guard, exactly as the `catalogs` memo above: the summary
+      // is a pure function of the projection map, the row map and the root id.
+      //
+      // The guard is INSIDE the factory, not an early return above it. A hook
+      // placed after a conditional return is a hook-order violation, and the
+      // condition here is session state that changes: `isChild` flips when a
+      // subagent is opened and `directCount` flips when the catalog loads, so a
+      // deferred `useMemo` would change the hook count between renders of one
+      // mounted component.
+      const summary = (0, React.useMemo)(() => (
+        wanted ? m.summarizeSubagentModels(projections, byId, sessionId) : EMPTY_SUMMARY
+      ), [projections, byId, sessionId, wanted])
+
+      // Both of these renders NOTHING. They stay where they are — after every
+      // hook, before the trigger — so a header with no subagents builds no
+      // button, no portal and no tooltip.
+      if (isChild) return null
+      if (catalog === undefined || directCount === 0) return null
+
       const triggerTooltip = () => {
-        const lines = [t(summary.running > 0 ? 'tip.running' : 'tip.summary', { count: formatCount(summary.running > 0 ? runningCount : directCount) })]
-        for (const group of summary.groups) lines.push(`  ${formatModelGroup(group)}`)
+        const lines = [t(summary.running > 0 ? 'tip.running' : 'tip.summary', { count: m.formatCount(summary.running > 0 ? runningCount : directCount) })]
+        for (const group of summary.groups) lines.push(`  ${m.formatModelGroup(group)}`)
         if (summary.total !== directCount) {
-          lines.push(t('chip.total', { count: formatCount(summary.total) }))
+          lines.push(t('chip.total', { count: m.formatCount(summary.total) }))
         }
         return lines.join('\n')
       }
-
-      if (isChild) return null
-      if (catalog === undefined || directCount === 0) return null
 
       const trigger = h(
         'button',
@@ -1430,10 +1371,10 @@ window.__ModuleLoader__.load({
           className: open ? 'dsh-smt-trigger dsh-smt-triggerOpen' : 'dsh-smt-trigger',
           'aria-haspopup': 'tree',
           'aria-expanded': open,
-          'aria-label': t(runningCount > 0 ? 'chip.countRunning' : 'chip.countTotal', { count: formatCount(runningCount > 0 ? runningCount : directCount) }),
+          'aria-label': t(runningCount > 0 ? 'chip.countRunning' : 'chip.countTotal', { count: m.formatCount(runningCount > 0 ? runningCount : directCount) }),
           onClick: () => setOpen((value) => !value),
         },
-        h('span', { className: 'dsh-smt-count' }, formatCount(directCount)),
+        h('span', { className: 'dsh-smt-count' }, m.formatCount(directCount)),
         h('span', { className: 'dsh-smt-chevron' }, '▾'),
       )
 
@@ -1446,12 +1387,16 @@ window.__ModuleLoader__.load({
         level: 1,
         projections,
         byId,
+        rowIds,
+        activeRowId,
+        setActiveRow: setActiveId,
         openChild: (address) => openChild(address),
         openChildAside: (address) => openChildAside(address),
         refreshProjection,
         toggleBranch,
         closeCatalog: () => setOpen(false),
         t,
+        m,
       }
 
       return h(
@@ -1565,8 +1510,125 @@ window.__ModuleLoader__.load({
       setTimeout(poll, 0)
     }
 
+    /**
+     * Fetch the Host generation's model catalog ONCE, for every chip in the page.
+     *
+     * `session.modelCatalog()` takes no arguments and returns a RESULT ENVELOPE,
+     * not a throw (`dsh-client-ui-model-selection/lib/client.js:118-121`). The
+     * cache is module-scoped rather than per-component because the catalog is
+     * scoped to the Host generation, not to a session: every chip in the page
+     * reads the same one, so a second chip must not spend a second round trip.
+     *
+     * FAILURE IS SILENT BY DESIGN. `.ok === false` and a thrown call both land on
+     * the same cached `null`, so a Host without a catalog — or one mid-reload —
+     * costs this chip nothing but the enrichment and never an exception. A
+     * resolved `null` also caches: the catalog is Host-generation scoped, so it
+     * will not change under this page.
+     *
+     * @param {any} loadCatalog - `() => Promise<{ok: boolean, value?: any}>`.
+     * @returns {Promise<Array<object> | null>} The `groups` array, or null when
+     *   the catalog is unavailable.
+     */
+    function loadCatalogOnce(loadCatalog) {
+      if (typeof loadCatalog !== 'function') return Promise.resolve(null)
+      if (catalogPromise !== null) return catalogPromise
+      catalogPromise = Promise.resolve()
+        .then(loadCatalog)
+        .then((response) => (response !== null && response !== undefined && response.ok === true ? response.value : null))
+        .then((value) => (value !== null && Array.isArray(value.groups) ? value.groups : null))
+        .catch(() => null)
+      return catalogPromise
+    }
+
+    /**
+     * One catalog model's reasoning-effort list and default, or null.
+     *
+     * Reads `groups[].models[]` for an exact `id` match — the catalog's own
+     * shape (`dsh-api-session-controller/lib/typert.host.js:586-602`) — and
+     * keeps `reasoning.efforts[].name` with `reasoning.defaultEffort` (`:593-599`).
+     * The NAME is preferred over the id because it is what the rest of the UI
+     * shows; an effort declaring only an id falls back to it, and a model with
+     * no `reasoning` block at all yields nothing.
+     *
+     * ABSENCE IS NORMAL. The catalog is advisory and may not list a model at
+     * all — "Core routing accepts unlisted model ids"
+     * (`dsh-llm/lib/index.js:1698-1708`) — so a miss renders nothing at all.
+     * Nothing here ever suggests a model is invalid, unavailable or broken.
+     *
+     * @param {Array<object> | null} groups - A loaded catalog's `groups`, or null.
+     * @param {string} model - The model id the session is on.
+     * @returns {{efforts: Array<{id: string, name: string}>, defaultEffort: string} | null}
+     *   The model's effort list, or null when the catalog does not describe it.
+     */
+    function catalogReasoningOf(groups, model) {
+      if (!Array.isArray(groups) || typeof model !== 'string' || model === '') return null
+      for (const group of groups) {
+        if (group === null || typeof group !== 'object' || !Array.isArray(group.models)) continue
+        for (const entry of group.models) {
+          if (entry === null || typeof entry !== 'object' || entry.id !== model) continue
+          const reasoning = entry.reasoning
+          if (reasoning === null || reasoning === undefined || typeof reasoning !== 'object') return null
+          const efforts = []
+          for (const effort of Array.isArray(reasoning.efforts) ? reasoning.efforts : []) {
+            const id = typeof effort?.id === 'string' ? effort.id : ''
+            const name = typeof effort?.name === 'string' && effort.name !== '' ? effort.name : id
+            if (name !== '') efforts.push({ id, name })
+          }
+          if (efforts.length === 0) return null
+          // `defaultEffort` is an effort ID, so the DEFAULT ENTRY is found by id
+          // and carried by NAME — the label the rest of the UI shows. Comparing
+          // the raw `defaultEffort` string against a name would silently miss
+          // whenever the two differ in case, which is the normal spelling.
+          const wanted = typeof reasoning.defaultEffort === 'string' ? reasoning.defaultEffort : ''
+          const fallback = efforts.find((effort) => effort.id === wanted)
+          return { efforts, defaultEffort: fallback === undefined ? '' : fallback.name }
+        }
+      }
+      return null
+    }
+
     /** Client plugin body. */
     function apply(ctx) {
+      // The model chunk, loaded EAGERLY and exactly once. Every consumer is a
+      // React component that calls these functions during render, so the exports
+      // have to be in hand before a render happens — a `React.lazy` wrapper would
+      // suspend the chat header on a network round trip to draw a chip that is
+      // otherwise arithmetic over props the render already holds.
+      //
+      // `require.async` is built into the `require` this factory was handed
+      // (`dsh-client-modules/lib/client.js:707-713`); the `./` specifier is what
+      // routes it to `importChunk`, which fetches `/plugins/dsh-subagent-model/
+      // client.model.js` and requires that file to self-register
+      // (`:717-740`) — which is why the chunk declares `chunk: 'client.model.js'`.
+      //
+      // A fetch that never lands must not take the header down with it, so the
+      // rejection is swallowed and `modelChunk` simply stays null; every seat
+      // then renders nothing, and the page's other occupants keep their places.
+      Promise.resolve()
+        .then(() => require.async('./client.model.js'))
+        .then((loaded) => { modelChunk = loaded })
+        .catch(() => {
+          modelChunk = null
+        })
+
+      // The chip tooltip enriches itself from the live catalog, and this is the
+      // ONLY way to reach it: `remote` is a ctx service, not a seed word. Read
+      // once here through `ctx.get` — a declared `inject: ['remote']` would park
+      // the header chip behind the whole Remote chain, which is what the empty
+      // gate at the end of this factory exists to avoid.
+      let remoteService = null
+      try {
+        const readRemote = typeof ctx.get === 'function' ? ctx.get('remote') : undefined
+        remoteService = readRemote !== null && readRemote !== undefined && typeof readRemote.session?.modelCatalog === 'function'
+          ? readRemote.session
+          : null
+      } catch (e) {
+        // A build without the Remote namespace leaves the chip exactly as it was.
+      }
+      const loadCatalog = remoteService === null
+        ? null
+        : () => remoteService.modelCatalog()
+
       whenService(ctx, 'locale', (locale) => {
         if (locale === null || typeof locale !== 'object') return
 
@@ -1669,7 +1731,10 @@ window.__ModuleLoader__.load({
                 order: ACTIONS_ORDER,
                 locale: NS,
               },
-              ModelChip,
+              // The catalog loader is NOT a standard prop the renderer supplies;
+              // it is bound here because the Remote namespace is reachable only
+              // through this plugin's own ctx.
+              (chipProps) => h(withModel(ModelChip), { ...chipProps, loadCatalog }),
             )
             try {
               if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'dsh-subagent-model: header slot')
@@ -1706,7 +1771,7 @@ window.__ModuleLoader__.load({
                 priority: SHADOW_PRIORITY,
                 locale: NS,
               },
-              SubagentModelTree,
+              withModel(SubagentModelTree),
             )
             try {
               if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'dsh-subagent-model: tree slot')
@@ -1729,7 +1794,7 @@ window.__ModuleLoader__.load({
                 order: HOVER_ORDER,
                 locale: NS,
               },
-              ModelHoverRow,
+              withModel(ModelHoverRow),
             )
             try {
               if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'dsh-subagent-model: hover slot')

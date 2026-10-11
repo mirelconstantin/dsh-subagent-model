@@ -8,6 +8,11 @@
  * cannot `import` or `export`), that it declares NO services, and that it
  * registers a fresh id in each of its two seats so no shipped occupant is
  * displaced. Each check names the shipped behaviour it protects.
+ *
+ * Every assertion here runs against `code()`, which blanks comments AND string
+ * literals while preserving offsets and line breaks. A plain `.includes()` over
+ * raw source is satisfied by a comment that quotes the thing it claims to check
+ * — which is how a check stops guarding anything without going red.
  */
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -20,6 +25,132 @@ const read = (relative) => readFile(path.join(root, relative), 'utf8')
 
 const checks = []
 const check = (name, fn) => checks.push([name, fn])
+
+/** Dictionaries shipped in `locale/`. `ro` is registered at runtime, not shipped in the catalog. */
+const SHIPPED_LOCALES = ['en', 'ro']
+
+/**
+ * Keys whose Romanian value is deliberately identical to the English one.
+ * Adding a key here is a claim that it needs no translation — the reason is
+ * the key's own comment in the check below, so it cannot drift silently.
+ */
+const UNCHANGED_BY_DESIGN = new Set(['chip.prefix', 'chip.modeOneShot', 'tip.depth', 'row.label', 'row.cache'])
+
+/**
+ * Flatten a nested dictionary into dotted keys.
+ * @param {Record<string, unknown>} node the parsed dictionary
+ * @returns {Map<string, string>} dotted key to leaf string
+ */
+function flattenDictionary(node, prefix = '') {
+  const out = new Map()
+  for (const [key, value] of Object.entries(node)) {
+    const dotted = `${prefix}${key}`
+    if (value !== null && typeof value === 'object') {
+      for (const [k, v] of flattenDictionary(value, `${dotted}.`)) out.set(k, v)
+    } else {
+      out.set(dotted, String(value))
+    }
+  }
+  return out
+}
+
+/**
+ * The `{name}` placeholders in one string, sorted so order is not a failure.
+ * @param {string} text a dictionary value
+ * @returns {string[]} placeholder names
+ */
+const placeholdersIn = (text) => [...String(text).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort()
+
+/**
+ * Blank comments, preserving every character offset and newline so a match
+ * still reports the caller's line numbers.
+ *
+ * A scanner, not a regex: `//` appears inside strings often enough that regex
+ * stripping deletes real code, and the whole point of this helper is that a
+ * check can still go red.
+ *
+ * @param {string} source Raw file text.
+ * @returns {string} the same text with comment bodies blanked.
+ */
+function stripComments(source) {
+  const out = source.split('')
+  const blank = (from, to) => {
+    for (let k = from; k < to && k < source.length; k += 1) if (out[k] !== '\n') out[k] = ' '
+  }
+  let i = 0
+  while (i < source.length) {
+    const c = source[i]
+    const n = source[i + 1]
+    if (c === '/' && n === '/') {
+      const end = source.indexOf('\n', i)
+      const stop = end === -1 ? source.length : end
+      blank(i, stop)
+      i = stop
+    } else if (c === '/' && n === '*') {
+      const end = source.indexOf('*/', i + 2)
+      const stop = end === -1 ? source.length : end + 2
+      blank(i, stop)
+      i = stop
+    } else if (c === "'" || c === '"' || c === '`') {
+      let j = i + 1
+      while (j < source.length) {
+        if (source[j] === '\\') { j += 2; continue }
+        if (source[j] === c || source[j] === '\n') break
+        j += 1
+      }
+      i = j + 1
+    } else {
+      i += 1
+    }
+  }
+  return out.join('')
+}
+
+/**
+ * The raw and comment-free views of one file.
+ *
+ * `code` keeps string literals, so a pattern shaped like a CALL —
+ * `t('chip.differs')`, `require('react-dom')`, `querySelector('style[…')`,
+ * `locale.addLanguage({ id: 'ro'` — matches only at a real call site. That is
+ * the anchor that matters here: the inline en/ro FALLBACK dictionaries repeat
+ * every key as `'chip.differs': '…'`, so a bare key search was satisfied by
+ * data, not by wiring.
+ *
+ * @param {string} relative repo-relative path
+ * @returns {Promise<{raw: string, code: string}>} the two views
+ */
+async function views(relative) {
+  const raw = await read(relative)
+  return { raw, code: stripComments(raw) }
+}
+
+/**
+ * Assert a declaration exists as real code, anchored at line start so a prose
+ * mention can never satisfy it.
+ * @param {string} source stripped source
+ * @param {string} name the declared identifier
+ * @param {string} label file the declaration must live in
+ */
+function assertDeclaresFunction(source, name, label) {
+  const re = new RegExp(`^\\s*(?:async\\s+)?function\\s+${name}\\s*\\(`, 'm')
+  assert.ok(re.test(source), `${label} must declare function ${name}(...)`)
+}
+
+/**
+ * The names `src/model.js` actually exports, read from its export block rather
+ * than a hand-copied list that goes stale the moment an export is added.
+ * @param {string} source stripped `src/model.js`
+ * @returns {string[]} exported identifiers
+ */
+function exportedNames(source) {
+  const block = source.match(/^export\s*\{([\s\S]*?)\}/m)
+  assert.ok(block, 'src/model.js must have an `export { ... }` block')
+  return block[1]
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => entry.split(/\s+as\s+/)[0].trim())
+}
 
 /* ------------------------------------------------------------------ *
  * Manifest
@@ -43,9 +174,68 @@ check('package.json declares the bundle patch and the client export', async () =
 check('package.json carries no runtime dependency', async () => {
   const pkg = JSON.parse(await read('package.json'))
   assert.equal(pkg.dependencies, undefined)
-  assert.equal(pkg.peerDependencies, undefined)
   // This plugin reads projection values the client store already holds, so it
-  // needs nothing installed to run.
+  // needs nothing installed to run. `peerDependencies` is the exception — see
+  // the compatibility-gate check below.
+})
+
+check('package.json pins the dsh runtime it was verified against', async () => {
+  const pkg = JSON.parse(await read('package.json'))
+  // The ONLY compatibility field the runtime evaluates is a `@deepseek-ai/dsh*`
+  // entry in `peerDependencies`: `evaluatePluginCompatibility` returns undefined
+  // immediately when the field is absent (dsh-app-boot/lib/index.js:289), so a
+  // manifest without one is never version-checked at all. `dsh.compatibility`
+  // is invented — `dsh` has only `bundle`, `client` and `profile` namespaces.
+  assert.equal(pkg.dsh?.compatibility, undefined, 'no dsh.compatibility namespace is read by the runtime')
+  const peers = pkg.peerDependencies
+  assert.ok(peers && typeof peers === 'object', 'peerDependencies must be an object')
+  const dshPeers = Object.entries(peers).filter(([name]) => name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-'))
+  assert.ok(dshPeers.length > 0, 'a dsh peer is required, or no version check ever runs')
+  for (const [name, range] of dshPeers) {
+    // :293 rejects a non-string range outright; :300 treats an empty range as
+    // incompatible and everything else through semver.
+    assert.equal(typeof range, 'string', `${name} range must be a string`)
+    assert.ok(range.trim() !== '', `${name} range must not be empty`)
+    // `workspace:^` / `workspace:~` / `workspace:*` are rewritten to the running
+    // runtime version (:295-299) — a pin that can never go red.
+    assert.ok(!['workspace:^', 'workspace:~', 'workspace:*'].includes(range), `${name} must be a real range, not a workspace: wildcard`)
+    assert.ok(!range.includes('||'), `${name} must name one verified release line, not a union`)
+  }
+})
+
+check('the declared dsh range accepts the runtime this plugin was tested on', async () => {
+  const pkg = JSON.parse(await read('package.json'))
+  const range = pkg.peerDependencies['@deepseek-ai/dsh-app-boot']
+  assert.ok(range, 'the plugin must name the runtime package it was verified against')
+  // The gate's whole test is `semver.satisfies(runtimeVersion, range,
+  // { includePrerelease: true })` (:300), with `includePrerelease` making every
+  // component numeric. So for the comparator forms this check accepts, plain
+  // tuple comparison of [major, minor, patch, prerelease] is faithful.
+  const TESTED = '0.2.0-rc.2'
+  const tuple = (version) => {
+    const m = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(version)
+    assert.ok(m, `${range}: ${version} is not MAJOR.MINOR.PATCH[-prerelease]`)
+    return [Number(m[1]), Number(m[2]), Number(m[3]), ...(m[4] === undefined ? [] : m[4].split('.'))]
+  }
+  const compare = (a, b) => {
+    for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+      const x = a[i] ?? 0
+      const y = b[i] ?? 0
+      if (x === y) continue
+      return x > y ? 1 : -1
+    }
+    return 0
+  }
+  const actual = tuple(TESTED)
+  for (const comparator of range.split(/\s+/).filter(Boolean)) {
+    const [, operator = '=', version] = /^(\^|~|>=|<=|>|<|=)?\s*(.+)$/.exec(comparator) ?? []
+    assert.ok(!['^', '~'].includes(operator), `${range}: use explicit comparators so the pin stays readable and testable`)
+    const order = compare(actual, tuple(version))
+    assert.ok(
+      { '=': order === 0, '>=': order >= 0, '>': order > 0, '<=': order <= 0, '<': order < 0 }[operator],
+      `${range}: \`${comparator}\` rejects the tested runtime ${TESTED}, so dsh would skip this bundle at boot`,
+    )
+  }
 })
 
 /* ------------------------------------------------------------------ *
@@ -68,27 +258,27 @@ check('the Loader row points at the Host anchor', async () => {
  * ------------------------------------------------------------------ */
 
 check('src/client.js is plain script: no import and no export statement', async () => {
-  const source = await read('src/client.js')
-  assert.ok(!/^\s*import\s/m.test(source), 'client.js must not use import')
-  assert.ok(!/^\s*export\s/m.test(source), 'client.js must not use export')
-  assert.ok(!/^\s*export\s*\{/m.test(source), 'client.js must not use an export block')
+  const { code } = await views('src/client.js')
+  // Comment-free, so the module doc comment's own "no `import`, no `export`"
+  // cannot satisfy these.
+  assert.ok(!/^\s*import\s/m.test(code), 'client.js must not use import')
+  assert.ok(!/^\s*export\s/m.test(code), 'client.js must not use export')
+  assert.ok(!/^\s*export\s*\{/m.test(code), 'client.js must not use an export block')
   // JSX does not survive an unevaluated classic script either.
-  assert.ok(!/>\s*<\/?[A-Za-z]/.test(source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')), 'client.js must not contain JSX')
+  assert.ok(!/>\s*<\/?[A-Za-z]/.test(code), 'client.js must not contain JSX')
 })
 
 check('src/client.js registers through window.__ModuleLoader__.load', async () => {
-  const source = await read('src/client.js')
-  assert.match(source, /window\.__ModuleLoader__\.load\(/)
+  const { code } = await views('src/client.js')
+  assert.match(code, /window\.__ModuleLoader__\.load\(/)
 })
 
 check('src/client.js declares no services', async () => {
-  const source = await read('src/client.js')
-  // Comments mention `inject: ['timer']` when explaining why the gate stays
-  // empty, so strip them before asserting on the real declaration.
-  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const { code } = await views('src/client.js')
   // `inject: []` is load-bearing: naming `slots` parks this row on a service
   // whose provider sits in the very packages this row is mounted beside, and
-  // the two can wait on each other until the boot fails.
+  // the two can wait on each other until the boot fails. Comment-free, so the
+  // notes quoting `inject: ['timer']` cannot satisfy the negative assertion.
   assert.match(code, /inject:\s*\[\s*\],/)
   assert.ok(!/inject:\s*\[(?!\s*\])/.test(code), 'client.js must not declare service dependencies')
 })
@@ -98,195 +288,320 @@ check('src/client.js declares no services', async () => {
  * ------------------------------------------------------------------ */
 
 check('the additive seats use fresh ids, and only the tree takes a shipped cell', async () => {
-  const source = await read('src/client.js')
+  const { code } = await views('src/client.js')
   // The header chip and the hover row ADD cells, so their ids must be this
   // plugin's own. The tree is the deliberate exception: it REPLACES
   // `subagent-catalog` (see the shadowing-priority check below), and it must
   // name that id through the constant so the takeover is one edit to undo.
-  const literalIds = [...source.matchAll(/\bid:\s*'([^']+)'/g)].map((m) => m[1])
+  const literalIds = [...code.matchAll(/\bid:\s*'([^']+)'/g)].map((m) => m[1])
   for (const id of literalIds) {
     assert.notEqual(id, 'subagent-catalog', 'the shipped cell must be claimed through SHADOWED_CELL_ID')
   }
   // Anchored on the registration object literals, which are indented deeper than
   // any function parameter list — a bare `\bid:` also matches `rootId,` in a
   // signature.
-  const shorthand = [...source.matchAll(/^\s{16}id:\s*([A-Za-z_][A-Za-z0-9_]*),$/gm)].map((m) => m[1])
+  const shorthand = [...code.matchAll(/^\s{16}id:\s*([A-Za-z_][A-Za-z0-9_]*),$/gm)].map((m) => m[1])
   assert.ok(shorthand.length === 3, `all three seats must register exactly one id each (found ${shorthand.length})`)
   for (const name of shorthand) {
-    assert.match(source, new RegExp(`const ${name} = '([^']+)'`), `${name} must be a declared constant`)
+    assert.match(code, new RegExp(`^\\s*const ${name} = '`, 'm'), `${name} must be a declared constant`)
   }
 })
 
 check('the header seat is the session actions slot', async () => {
-  const source = await read('src/client.js')
-  assert.match(source, /ACTIONS_SLOT\s*=\s*'conversation\.session\.header\.actions'/)
+  const { code } = await views('src/client.js')
+  // The slot name is a string literal, so the constant's DECLARATION is
+  // asserted from the comment-free copy and its VALUE from the raw text: the
+  // declaration is what binds the two together.
+  assert.match(code, /^\s*const ACTIONS_SLOT = /m)
+  assert.match((await read('src/client.js')), /ACTIONS_SLOT\s*=\s*'conversation\.session\.header\.actions'/)
 })
 
 check('the hover seat is the sidebar session-row hover slot', async () => {
-  const source = await read('src/client.js')
-  assert.match(source, /HOVER_SLOT\s*=\s*'sidebar\.session\.row\.hover'/)
+  const { code } = await views('src/client.js')
+  assert.match(code, /^\s*const HOVER_SLOT = /m)
+  assert.match((await read('src/client.js')), /HOVER_SLOT\s*=\s*'sidebar\.session\.row\.hover'/)
 })
 
 check('both registrations are deferred through slots.inject', async () => {
-  const source = await read('src/client.js')
+  const { code } = await views('src/client.js')
   // `register` throws when the slot is not yet declared
   // (`dsh-client-ui-slots/lib/index.js:163-165`), so every seat is wrapped.
-  const injects = source.match(/slots\.inject\(/g) ?? []
+  const injects = code.match(/slots\.inject\(/g) ?? []
   assert.ok(injects.length >= 3, 'all three seats must be deferred through slots.inject')
 })
 
 check('the stylesheet injects idempotently', async () => {
-  const source = await read('src/client.js')
-  assert.match(source, /querySelector\('style\[data-plugin-css="'/)
-  assert.match(source, /tag\.setAttribute\('data-plugin-css'/)
+  const { code } = await views('src/client.js')
+  // The early return on an existing marker is what makes the injection
+  // idempotent; the attribute write is what makes it findable. Asserted
+  // together, because neither alone proves the other is still wired.
+  const start = code.indexOf('function injectStyles(')
+  const fn = code.slice(start, start + 900)
+  assert.match(fn, /querySelector\('style\[data-plugin-css="/)
+  assert.match(fn, /if \([^)]*querySelector\([^)]*\) !== null\) return/)
+  assert.match(fn, /\.setAttribute\('data-plugin-css'/)
 })
 
 /* ------------------------------------------------------------------ *
  * Shared logic is mirrored, not duplicated in behaviour
  * ------------------------------------------------------------------ */
 
-check('src/client.js inlines the model-selection key it reads', async () => {
-  const client = await read('src/client.js')
-  const model = await read('src/model.js')
-  // The browser half cannot import the shared module, so it inlines it. The
-  // two copies must agree on the projection keys or the chip reads nothing.
-  assert.ok(model.includes("const PROJECTION_KEY = 'modelSelection'"))
-  assert.ok(model.includes("const IDENTITY_KEY = 'subagent'"))
-  assert.ok(client.includes("const PROJECTION_KEY = 'modelSelection'"))
-  assert.ok(client.includes("const IDENTITY_KEY = 'subagent'"))
+check('the model-selection keys are spelled once, in the chunk', async () => {
+  const { code: chunk } = await views('src/client.model.js')
+  const { code: model } = await views('src/model.js')
+  const { code: client } = await views('src/client.js')
+  // The browser half used to inline these two so the two files could not drift;
+  // it now reads them off the chunk. So the single declaration must live in the
+  // chunk, `src/model.js` must only re-export it, and the browser half must not
+  // redeclare either one. Anchored at line start, so a comment cannot satisfy it.
+  for (const [name, value] of [['PROJECTION_KEY', 'modelSelection'], ['IDENTITY_KEY', 'subagent']]) {
+    assert.match(chunk, new RegExp(`^\\s*const ${name} = '${value}'$`, 'm'), `src/client.model.js must declare ${name}`)
+    assert.ok(!new RegExp(`^\\s*const ${name} = '${value}'$`, 'm').test(client), `src/client.js must not redeclare ${name}`)
+    assert.ok(!new RegExp(`^const ${name} = '${value}'$`, 'm').test(model), `src/model.js must re-export ${name}, not redeclare it`)
+  }
 })
 
-check('src/client.js inlines every exported model function', async () => {
-  const client = await read('src/client.js')
-  const model = await read('src/model.js')
-  for (const name of ['shortenModel', 'readRoute', 'childRouteOf', 'readProjection', 'isLoaded', 'isPending', 'resolveModel', 'resolveRoute', 'catalogOf', 'orderGroups', 'groupRows', 'summarizeSubagentModels', 'formatModelGroup', 'formatCount']) {
-    assert.ok(model.includes(`function ${name}(`), `src/model.js must export ${name}`)
-    assert.ok(client.includes(`function ${name}(`), `src/client.js must inline ${name}`)
+check('the shared logic lives in the chunk, which is loaded through require.async', async () => {
+  const { code: client } = await views('src/client.js')
+  const { code: chunk } = await views('src/client.model.js')
+  const { code: model } = await views('src/model.js')
+  const exported = exportedNames(model)
+  // The list is derived from the module's own export block, so an export added to
+  // src/model.js is covered here the moment it lands.
+  assert.ok(exported.length >= 20, `src/model.js exports at least the known surface (found ${exported.length})`)
+
+  // REPLACES the old "src/client.js inlines every exported model function".
+  // That check asserted the bug this change removes: the browser half used to
+  // carry its own copies because a comment claimed the Host serves one file per
+  // package. It does not — `require.async('./x.js')` routes to `importChunk`
+  // (dsh-client-modules/lib/client.js:707-713) and the Host serves the sibling
+  // chunk (dsh-client-modules/lib/index.js:915-932, CLIENT_CHUNK at :169) —
+  // which three shipped packages already rely on. The invariant is now the
+  // opposite one: the logic is declared ONCE, in the chunk, and both the page
+  // and `node --test` reach THAT copy.
+  // The chunk's own bindings are checked below; here the browser half must simply
+  // not declare a function of its own for any exported name.
+  for (const name of exported) {
+    assert.match(chunk, new RegExp(`^\\s*const ${name}\\s*=|^\\s*function ${name}\\s*\\(|^\\s*${name}\\s*,`, 'm'), `src/client.model.js must declare ${name}`)
+    assert.ok(!new RegExp(`^\\s*(?:async\\s+)?function\\s+${name}\\s*\\(`, 'm').test(client), `${name} must not be inlined into src/client.js`)
+  }
+
+  // The browser half really loads that chunk, and reads the functions off the
+  // resolved exports rather than through a name of its own.
+  assert.match(client, /require\.async\(['"]\.\/client\.model\.js['"]\)/, 'src/client.js must load the chunk through require.async')
+  assert.match(client, /^\s*let modelChunk = null$/m, 'src/client.js must hold the resolved chunk in one place')
+  for (const name of ['resolveRoute', 'summarizeSubagentModels', 'isLoaded', 'formatCount', 'formatModelGroup']) {
+    assert.match(client, new RegExp(`\\bm\\.${name}\\b`), `src/client.js must read ${name} off the resolved chunk`)
+  }
+
+  // The chunk is served raw, so it must self-register under the name
+  // `importChunk` looks for, and it must stay a classic script.
+  assert.match(chunk, /window\.__ModuleLoader__\.load\(/)
+  assert.match(chunk, /id:\s*'dsh-subagent-model\/client\.model\.js'/)
+  assert.match(chunk, /chunk:\s*'client\.model\.js'/)
+  assert.match(chunk, /return module\.exports/)
+  assert.ok(!/^\s*import\s/m.test(chunk), 'client.model.js must not use import')
+  assert.ok(!/^\s*export\s/m.test(chunk), 'client.model.js must not use export')
+  assert.ok(!/>\s*<\/?[A-Za-z]/.test(chunk), 'client.model.js must not contain JSX')
+
+  // `src/model.js` is the ESM face of that same chunk, so the Node suite and the
+  // page cannot be exercising two different implementations.
+  assert.match(model, /^\s*import \{ readFileSync \} from 'node:fs'$/m, 'src/model.js must reach the chunk over node:fs')
+  assert.match(model, /'\.\/client\.model\.js'/, 'src/model.js must name the chunk it re-exports')
+})
+
+check('src/model.js exports exactly what the chunk exports', async () => {
+  const { code: chunk } = await views('src/client.model.js')
+  const { code: model } = await views('src/model.js')
+  // Guard the re-export against rotting in either direction: a name added to the
+  // chunk and forgotten in model.js fails the Node suite at import time, and one
+  // exported from model.js with no binding behind it fails here.
+  const assignment = /module\.exports\s*=\s*\{([\s\S]*?)\n\s*\}/.exec(chunk)
+  assert.ok(assignment, 'src/client.model.js must assign a module.exports object')
+  const names = assignment[1].split(',').map((entry) => entry.trim()).filter(Boolean)
+  assert.ok(names.length >= 20, `the chunk exports the full surface (found ${names.length})`)
+  assert.deepEqual([...names].sort(), [...exportedNames(model)].sort(), 'src/model.js must export exactly what the chunk exports')
+  for (const name of names) {
+    assert.match(model, new RegExp(`^\\s*${name},$`, 'm'), `src/model.js must bind ${name} from the chunk`)
   }
 })
 
 check('src/client.js reads the list-row projection values as the subagent fallback', async () => {
-  const client = await read('src/client.js')
+  const { code } = await views('src/client.js')
   // `projectionsBySession` only holds sessions whose projection store is
   // resident, so a never-opened subagent is invisible in it. The list rows
   // carry the same values under `projectionValues`
   // (dsh-api-session-controller/lib/client.js:2942,3521,3549) — reading only
-  // the first source is what made subagents show no model at all.
-  assert.ok(client.includes('projectionValues'), 'client.js must read the list-row projection values')
-  assert.match(client, /byId\?\.\[sessionId\]\?\.projectionValues/)
+  // the first source is what made subagents show no model at all. Both anchors
+  // are real code; the raw text appeared in 4 comments as well.
+  assert.ok(code.includes('projectionValues'), 'client.js must read the list-row projection values')
+  assert.match(code, /byId\?\.\[sessionId\]\?\.projectionValues/)
 })
 
 check('src/client.js renders the reasoning effort beside the model', async () => {
-  const client = await read('src/client.js')
-  // The effort is optional on the same route record, so a guard must keep the
-  // chip compact when it is unset.
-  assert.match(client, /route\.effort !== ''\s*\?/)
-  assert.match(client, /'dsh-smr-chipEffort'/)
-  assert.match(client, /chip\.titleWithEffort/)
+  const { code } = await views('src/client.js')
+  // `dsh-smr-chipEffort` and `chip.titleWithEffort` appeared 4 times each as raw
+  // text: twice in the en/ro FALLBACK dictionaries, and once each in the
+  // FALLBACK `t()` calls. Deleting the real wiring left the check green. The
+  // `className:` and the `t(` CALL are what prove it.
+  assert.match(code, /route\.effort !== ''\s*\?/)
+  assert.match(code, /className:\s*'dsh-smr-chipEffort'/)
+  assert.match(code, /t\(\s*'chip\.titleWithEffort'/)
 })
 
 check('src/client.js reports one-shot descent rather than guessing a model', async () => {
-  const client = await read('src/client.js')
+  const { code } = await views('src/client.js')
   // A one-shot descriptor omits the agent route
   // (dsh-subagent/lib/types/descriptor.js:37,118-126), so inherited is the
   // honest answer for a child whose explicit model is not durable.
-  assert.match(client, /source === 'inherited'/)
-  assert.match(client, /row\.inherited/)
-})
-
-check('the header chip renders on a child session too', async () => {
-  const client = await read('src/client.js')
-  // Removing the `origin === 'subagent'` guard is what makes an OPENED subagent
-  // state its model. A reintroduced guard would hide it again.
-  const start = client.indexOf('function ModelChip(')
-  const end = client.indexOf('function ModelHoverRow(')
-  assert.ok(start !== -1 && end > start, 'the header chip component must exist')
-  const chip = client.slice(start, end)
-  assert.ok(!/origin === 'subagent'/.test(chip), 'the header chip must not skip child sessions')
-  assert.ok(chip.includes('resolveRoute('), 'the header chip must resolve the effective route')
-})
-
-check('the inherited route is recovered by walking the parent chain', async () => {
-  const client = await read('src/client.js')
-  const model = await read('src/model.js')
-  // With model selection off (the `subagent` default) every child inherits its
-  // parent's route, and that route is nowhere in the child's own log — so the
-  // walk up `parentId` is what lets a subagent's header name a real model.
-  for (const [source, label] of [[client, 'src/client.js'], [model, 'src/model.js']]) {
-    assert.match(source, /parentId/, `${label} must read parentId`)
-    assert.match(source, /visited\.has/, `${label} must guard against a cyclic chain`)
-    assert.match(source, /MAX_PARENT_HOPS/, `${label} must bound the walk`)
-  }
-})
-
-check('the tooltip groups subagents by the model they run on', async () => {
-  const client = await read('src/client.js')
-  assert.match(client, /summarizeSubagentModels\(projections, byId, sessionId\)/)
-  assert.match(client, /formatModelGroup\(group\)/)
-  // The summary must be a LAZY thunk: a Tooltip only calls its label once the
-  // bubble is visible, so an ordinary request pays nothing for the walk.
-  assert.match(client, /const tooltipLabel = \(\) => \{/)
-  assert.match(client, /label: tooltipLabel/)
+  // `row.inherited` matched 6 raw hits and NONE was a call — 4 were the
+  // FALLBACK dictionaries' own `row` keys. The `t(` CALL is the proof.
+  assert.match(code, /source === 'inherited'/)
+  assert.match(code, /t\('row\.inherited'\)/)
 })
 
 check('the tooltip also cuts the same summary by depth', async () => {
-  const client = await read('src/client.js')
+  const { code } = await views('src/client.js')
   // The integration with the sibling dsh-subagent-tree: both facts come from
   // one walk, so they read in one place. It is printed only when a generation
-  // actually splits the flat summary.
-  assert.match(client, /summary\.byDepth/)
-  assert.match(client, /tip\.byDepth/)
-  assert.match(client, /splits/)
+  // actually splits the flat summary. `tip.byDepth` matched 3 raw hits and 2
+  // were FALLBACK dictionary keys.
+  assert.match(code, /summary\.byDepth/)
+  assert.match(code, /t\('tip\.byDepth'\)/)
+  assert.match(code, /\bconst splits = /)
 })
 
 check('the hover row shows what the session actually did', async () => {
-  const client = await read('src/client.js')
+  const { code } = await views('src/client.js')
   // Every fact is read from a projection the client already holds, and each row
   // appears only when its value is present, so a zero never reads as "did
-  // nothing".
-  assert.match(client, /values\.sessionStats/)
-  assert.match(client, /values\.subagentTiming/)
-  assert.match(client, /row\.turns/)
-  assert.match(client, /row\.task/)
-  assert.match(client, /row\.modeOneShot/)
-  assert.match(client, /decodeTokens/)
+  // nothing". `row.turns` matched 3 raw hits, all dictionary keys.
+  assert.match(code, /values\.sessionStats/)
+  assert.match(code, /values\.subagentTiming/)
+  assert.match(code, /t\('row\.turns',/)
+  assert.match(code, /t\('row\.task'\)/)
+  assert.match(code, /'one-shot' \? 'row\.modeOneShot' : 'row\.modeContinuable'/)
+  assert.match(code, /decodeTokens/)
+})
+
+check('the header chip renders on a child session too', async () => {
+  const { code } = await views('src/client.js')
+  // Removing the `origin === 'subagent'` guard is what makes an OPENED subagent
+  // state its model. A reintroduced guard would hide it again. Slicing the
+  // comment-free copy means a guard quoted in a comment beside the component
+  // cannot produce a false pass.
+  const start = code.search(/^\s*function ModelChip\(/m)
+  const end = code.search(/^\s*function ModelHoverRow\(/m)
+  assert.ok(start !== -1 && end > start, 'the header chip component must exist')
+  const chip = code.slice(start, end)
+  assert.ok(!/origin === 'subagent'/.test(chip), 'the header chip must not skip child sessions')
+  assert.ok(/\bresolveRoute\(/.test(chip), 'the header chip must resolve the effective route')
+})
+
+check('the inherited route is recovered by walking the parent chain', async () => {
+  const { code: client } = await views('src/client.js')
+  const { code: chunk } = await views('src/client.model.js')
+  // With model selection off (the `subagent` default) every child inherits its
+  // parent's route, and that route is nowhere in the child's own log — so the
+  // walk up `parentId` is what lets a subagent's header name a real model. The
+  // walk lives in the chunk now; the browser half must still CALL it.
+  for (const source of [chunk]) {
+    assert.match(source, /parentId/, 'the chunk must read parentId')
+    assert.match(source, /visited\.has/, 'the chunk must guard against a cyclic chain')
+    assert.match(source, /MAX_PARENT_HOPS/, 'the chunk must bound the walk')
+  }
+  assert.match(client, /\bm\.resolveRoute\(/, 'src/client.js must resolve routes through the chunk')
+})
+
+check('the tooltip groups subagents by the model they run on', async () => {
+  const { code } = await views('src/client.js')
+  // `formatModelGroup(group)` matched 3 raw hits and all 3 were code — but one
+  // is the function DECLARATION, so the pattern was satisfied by the definition
+  // even with every call site deleted. Anchored on the call instead: the
+  // template literal that puts a formatted group into the tooltip body. Both
+  // calls now go through the chunk, so the `m.` prefix is part of the anchor.
+  assert.match(code, /m\.summarizeSubagentModels\(projections, byId, sessionId\)/)
+  // Both call shapes: the flat summary body and the by-depth breakdown. Missing
+  // either leaves the tooltip silently showing a different list than the walk
+  // computed.
+  assert.match(code, /\$\{m\.formatModelGroup\(group\)\}/)
+  assert.match(code, /\.map\(m\.formatModelGroup\)/)
+  // The summary must be a LAZY thunk: a Tooltip only calls its label once the
+  // bubble is visible, so an ordinary request pays nothing for the walk.
+  assert.match(code, /const tooltipLabel = \(\) => \{/)
+  assert.match(code, /label: tooltipLabel/)
 })
 
 check('the queued route switch is reported with the model it replaces', async () => {
-  const client = await read('src/client.js')
-  const model = await read('src/model.js')
+  const { code } = await views('src/client.js')
+  const { code: chunk } = await views('src/client.model.js')
   // No projection ships `request/header`, so the per-turn history is NOT
   // reachable from a client plugin. What IS reachable is the disagreement
-  // between `next` and `lastUsed`, which names the route being replaced.
-  assert.match(model, /switchedFrom: pending \? lastUsed\.model : ''/)
-  assert.match(client, /route\.switchedFrom/)
-  assert.match(client, /row\.switchFrom/)
+  // between `next` and `lastUsed`, which names the route being replaced. The
+  // field is produced in the chunk now and read by the hover row.
+  assert.match(chunk, /switchedFrom: pending \? lastUsed\.model : ''/)
+  assert.match(code, /route\.switchedFrom/)
+  assert.match(code, /t\('row\.switchFrom',/)
 })
 
 check('the tree owns the shipped catalog cell at a written shadowing priority', async () => {
-  const client = await read('src/client.js')
+  const { code } = await views('src/client.js')
   // The shipped CatalogRows renders no per-row slot
   // (dsh-client-ui-subagent/lib/client.js:164-338), so a marker beside a
   // subagent REQUIRES owning the cell. A `list` slot keeps the first entry per
   // `id` cell, so a very low priority is what performs the takeover.
-  assert.match(client, /const SHADOWED_CELL_ID = 'subagent-catalog'/)
-  assert.match(client, /const SHADOW_PRIORITY = -9999/)
-  assert.match(client, /id: SHADOWED_CELL_ID/)
-  assert.match(client, /priority: SHADOW_PRIORITY/)
+  //
+  // The priority is asserted to be DISTINCT, not to equal a literal: the two
+  // sibling plugins both claim `subagent-catalog`, and the slots registry
+  // rejects a duplicate `id` only AT THE SAME priority
+  // (dsh-client-ui-slots/lib/index.js:183-184) — so a fixed -9999 here would
+  // break the header the moment `dsh-subagent-tree` is co-installed. The old
+  // assertion of `-9999` matched only the sibling's value quoted in a comment.
+  assert.match(code, /^\s*const SHADOWED_CELL_ID = 'subagent-catalog'$/m)
+  const priority = code.match(/^\s*const SHADOW_PRIORITY = (-?\d+)$/m)
+  assert.ok(priority, 'src/client.js must declare a numeric SHADOW_PRIORITY')
+  assert.ok(Number(priority[1]) < 0, 'the shadowing priority must be very low so the list slot keeps this entry')
+  assert.ok(!/-9999\b/.test(code), 'SHADOW_PRIORITY must not collide with dsh-subagent-tree, which claims the same cell')
+  assert.match(code, /id: SHADOWED_CELL_ID/)
+  assert.match(code, /priority: SHADOW_PRIORITY/)
 })
 
 check('the route marker stays silent when nothing distinguishes the child', async () => {
-  const client = await read('src/client.js')
+  const { code } = await views('src/client.js')
   // With selection off every child inherits, so marking each one would mark all
   // of them and say nothing. A marker appears only for a subagent whose route
   // is its OWN.
-  assert.match(client, /function routeMarker\(/)
-  assert.match(client, /dsh-smt-modelDiffers/)
-  assert.match(client, /chip\.differs/)
+  //
+  // `dsh-smt-modelDiffers` and `chip.differs` matched 5 raw hits between them
+  // and NONE was a call: 3 were the two en/ro FALLBACK dictionaries, 1 the CSS
+  // rule and 1 the className template. Deleting the actual call site kept both
+  // green. The `t(` CALL is the proof; the className keeps its own assertion.
+  assert.match(code, /^\s*function routeMarker\(/m)
+  assert.match(code, /t\('chip\.differs',/)
+  assert.match(code, /className: differs \? 'dsh-smt-model dsh-smt-modelDiffers'/)
   // The tree must port through react-dom: rendered inline it would be clipped
-  // by the conversation shell's overflow.
-  assert.match(client, /react-dom/)
-  assert.match(client, /createPortal/)
+  // by the conversation shell's overflow. The bare word appears only in
+  // comments; the `require` call is what proves it is actually reached for.
+  assert.match(code, /require\('react-dom'\)/)
+  assert.match(code, /createPortal = reactDom\.createPortal/)
+})
+
+check('src/client.js registers the Romanian language', async () => {
+  const { code } = await views('src/client.js')
+  // `ro` is NOT a shipped catalog language (`LOCALE_IDS = ["zh", "en"]`,
+  // dsh-client-locale/lib/client.js:922) and the fallback chain walks the
+  // CATALOG, not the registered dictionaries (`:1369-1386`) — so without this
+  // call the whole ro dictionary is unreachable and the chip silently renders
+  // English. Nothing guarded this: deleting the block kept every check green.
+  assert.match(code, /locale\.addLanguage\(\{\s*id: 'ro'/)
+  // The guard is the other half: an older runtime has no `addLanguage`, and an
+  // unguarded call would throw inside the locale registration and take the
+  // whole chip down with it. The word appears in the explanatory comment too,
+  // so the `typeof` test is what must be present as code.
+  assert.match(code, /if \(typeof locale\.addLanguage === 'function'\)/)
+  // And the registration must be deferred, so it runs once the locale service
+  // is up rather than during activation.
+  assert.match(code, /ctx\.effect\(addLanguage/)
 })
 
 /* ------------------------------------------------------------------ *
@@ -294,11 +609,48 @@ check('the route marker stays silent when nothing distinguishes the child', asyn
  * ------------------------------------------------------------------ */
 
 check('every shipped dictionary exists and parses', async () => {
-  for (const locale of ['en', 'ro']) {
-    const raw = await read(`locale/${locale}.json`)
-    const nested = JSON.parse(raw)
+  for (const locale of SHIPPED_LOCALES) {
+    const nested = JSON.parse(await read(`locale/${locale}.json`))
     assert.ok(nested.chip !== undefined, `${locale}.json needs a chip group`)
     assert.ok(nested.row !== undefined, `${locale}.json needs a row group`)
+  }
+})
+
+check('ro is a complete, translated twin of en', async () => {
+  const en = flattenDictionary(JSON.parse(await read('locale/en.json')))
+  const ro = flattenDictionary(JSON.parse(await read('locale/ro.json')))
+
+  // A missing key is not a cosmetic difference: the locale face falls through to
+  // the English string, so an untranslated row appears with no warning.
+  assert.deepEqual([...ro.keys()].sort(), [...en.keys()].sort(), 'locale/ro.json must define exactly the keys locale/en.json defines')
+
+  for (const [key, english] of en) {
+    const romanian = ro.get(key)
+
+    // Placeholders are the interpolation contract. A renamed or dropped
+    // `{effort}` renders `undefined` into the tooltip.
+    const expected = placeholdersIn(english)
+    const actual = placeholdersIn(romanian)
+    assert.deepEqual(actual, expected, `${key}: ro placeholders ${JSON.stringify(actual)} do not match en ${JSON.stringify(expected)}`)
+
+    // An identical value is the shape of a forgotten translation. These four are
+    // the exceptions, each for a reason:
+    //   chip.prefix      — the word rendered before the model id; "model" is the
+    //                      same noun in Romanian, and a translated prefix would
+    //                      read as a different label than the chip's own title.
+    //   chip.modeOneShot — the shipped mode keyword "one-shot" (the same token
+    //                      `dsh-subagent` uses); translating it would stop
+    //                      matching what the session list prints.
+    //   tip.depth        — "gen {depth}", an abbreviation of "generation" used
+    //                      as a column head, not a sentence.
+    //   row.label        — the literal word "Model", the plugin's name in both
+    //                      languages.
+    //   row.cache        — the prompt cache is named "cache" in Romanian
+    //                      technical usage; a translation would name a different
+    //                      thing than the projection reports.
+    if (english === romanian && !UNCHANGED_BY_DESIGN.has(key)) {
+      assert.fail(`${key}: ro still reads the English string ${JSON.stringify(english)} — translate it or add it to UNCHANGED_BY_DESIGN with a reason`)
+    }
   }
 })
 

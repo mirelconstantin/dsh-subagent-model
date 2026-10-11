@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/npm/v/dsh-subagent-model-FFC24D?style=flat-square&logo=npm&logoColor=black" alt="npm version">
   <img src="https://img.shields.io/npm/dw/dsh-subagent-model-F0522C?style=flat-square&logo=npm&logoColor=white" alt="npm downloads">
   <img src="https://img.shields.io/badge/Node-%3E%3D20-FFC24D?style=flat-square&logo=node&logoColor=black" alt="Node">
-  <img src="https://img.shields.io/badge/Tests-63-FFC24D?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-84-FFC24D?style=flat-square" alt="Tests">
   <img src="https://img.shields.io/badge/Licence-Apache--2.0-F0522C?style=flat-square" alt="Licence">
 </p>
 
@@ -39,6 +39,13 @@ point ships as committed source: the Host reads `src/client.js` and serves it to
 the page verbatim, so pnpm never has to run anything and you are never asked to
 allowlist a build. Restart the profile afterwards and the chip appears.
 
+The only dependency-shaped field is a **peer range on the runtime itself** —
+`@deepseek-ai/dsh-app-boot: >=0.2.0-rc.2 <0.3.0` — and that is the field DSH
+actually evaluates: a plugin whose dsh peer range does not satisfy the running
+runtime is **skipped at boot**, with a warning naming the mismatch. Accept it on
+an unexpected runtime with `dsh plugin allow-version`, or wait for a release
+that fits the range.
+
 <details>
 <summary>Installing by other routes</summary>
 
@@ -58,7 +65,13 @@ allowlist a build. Restart the profile afterwards and the chip appears.
 | --- | --- | --- |
 | **header chip** | `model: <id> (effort)` for the **active** Session | beside the subagent pill in the conversation header |
 | **subagent tree** | the shipped subagent dropdown, with a **route marker** per row | the `subagent-catalog` header cell |
-| **hover-card rows** | model, effort, work done, active time, task, kind | inside every Session's hover card in the sidebar |
+| **hover-card rows** | model, effort, work done, active time, tokens, cache, context window, task, kind | inside every Session's hover card in the sidebar |
+| **per-turn row** | which model each turn actually ran on, and what it switched from | the action row under a completed turn |
+
+The chip's tooltip also names the reasoning efforts a model offers and which one
+is its default, read from the live model catalog. A model the catalog does not
+list adds nothing: the catalog is advisory and routing accepts ids it does not
+advertise, so its absence is never treated as a fault.
 
 The effort appears only when one is set — it is optional on the same route record
 the model comes from, and a session with none configured stays compact.
@@ -128,15 +141,21 @@ To pin every subagent's model, set `modelSelectionSettings: true` on the
 `subagent` tool and pass a route per call; `list_subagent_models` then becomes
 available for discovery.
 
-## Three seats, and why the third replaces rather than adds
+## Four seats, and why the tree replaces rather than adds
 
-The chip and the hover rows ADD a cell each, so nothing shipped is displaced.
-The tree cannot: the shipped `CatalogRows` renders no per-row slot
+The chip, the hover rows and the per-turn row ADD a cell each, so nothing
+shipped is displaced. The tree cannot: the shipped `CatalogRows` renders no
+per-row slot
 (`dsh-client-ui-subagent/lib/client.js:164-338`), so a marker beside a subagent
 requires owning the `subagent-catalog` cell itself. It therefore claims that id
-at `priority: -9999`, which is what makes a `list` slot keep it instead of the
-shipped occupant (`dsh-client-ui-slots/lib/index.js:221`, `:278-293`) while a
-duplicate id is rejected only at the *same* priority (`:183-184`).
+at a written `priority: -9998`, which is what makes a `list` slot keep it
+instead of the shipped occupant (`dsh-client-ui-slots/lib/index.js:221`,
+`:278-293`) while a duplicate id is rejected only at the *same* priority
+(`:183-184`).
+
+That number is **-9998 and not -9999** on purpose: the sibling
+`dsh-subagent-tree` claims the same cell at -9999, and co-installed the two would
+collide at one priority and throw, blanking the header.
 
 That takeover is the one decision worth knowing about: removing the
 `SHADOWED_CELL_ID` registration in `src/client.js` restores the shipped
@@ -144,8 +163,10 @@ dropdown and loses the markers, and nothing else depends on it.
 
 | slot | declared by | this plugin |
 | --- | --- | --- |
-| `conversation.session.header.actions` | `dsh-client-ui-conversation/lib/index.js:18268-18271` | `id 'subagent-model'` (chip), and `id 'subagent-catalog'` at `priority -9999` (tree) |
+| `conversation.session.header.actions` | `dsh-client-ui-conversation/lib/index.js:18268-18271` | `id 'subagent-model'` (chip), and `id 'subagent-catalog'` at `priority -9998` (tree) |
 | `sidebar.session.row.hover` | `dsh-client-ui-workspace/lib/index.js:4322-4325` | `id 'subagent-model'` |
+| `conversation.chat.turnTail` | `dsh-cordis-client-runner/lib/client.js:2564-2566` | `id 'dsh-subagent-model-turn-route'` (per-turn row) |
+| `conversation.chat.node` | `dsh-client-ui-chat/lib/client.js` (keyed by node kind) | the same kind, `visibility: hidden` — the store the tail row reads |
 
 ## What each seat tells you
 
@@ -169,21 +190,30 @@ so a zero never reads as "did nothing": model and effort, turns and steps, activ
 time, generated tokens, the delegating agent's own task label, and the mode that
 decides whether the session can be continued.
 
-## Why there is no per-turn model history
+## Per-turn model history
 
-`request/header` is the event recording each request's route, and nothing in
-`SessionProjectionMap` ships it — the projections are `modelSelection`,
-`subagentCatalog`, `sessionStats`, `tokenUsage`, `contextBreakdown` and the rest,
-none carrying a route history. The `conversation.chat.turnTail` seat receives
-only `turn`, `seq` and `openFile`
-(`dsh-cordis-client-runner/lib/index.js:2570-2607`), and the log itself is
-Host-side, reached only through `ctx.sessionQuery`
-(`dsh-subagent/lib/types/list-children.js:70-72`).
+`request/header` is the event recording each request's route. Nothing in
+`SessionProjectionMap` ships it, so the chip reads the `modelSelection`
+projection — but the event journal itself reaches the browser unfiltered, and
+`request/header` is in it (`dsh-api-session-controller/lib/client.js:166`, the
+stream at `:398`). The harness's own chat view already reads it that way
+(`dsh-client-ui-chat/lib/client.js:9389-9394`).
 
-So a client plugin cannot read which model each turn used. What is reachable is
-the disagreement between `next` and `lastUsed`, reported as
-`Route change  <from> → <to>, not yet applied`. The real per-turn history would
-need a Host-side Remote over the log — a different plugin, with a restart cost.
+So each turn's real route is recovered client-side, with no Host work: a
+`request/header` conversation Definition folds the events into a per-turn map,
+and a `conversation.chat.turnTail` entry reads it. Because the opening journal
+frame is a snapshot, a session opened before the plugin mounted still gets its
+history rather than only events from that moment on.
+
+`reason` decides where a turn's route is anchored. `initial`, `resume` and
+`series` all anchor; a bare `change` is a mid-series re-route and does not,
+unless it carries `startsSeries`. An absent `reasoningEffort` is not "off" — a
+`adapterDefaults.reasoningEffort` means the adapter supplies it, and the row
+says so rather than implying no effort.
+
+The older `Route change <from> → <to>, not yet applied` row is the disagreement
+between `next` and `lastUsed`, and still reports a queued switch that no
+request has consumed yet.
 
 ## Honesty about missing data
 
@@ -202,28 +232,39 @@ Four states are kept apart, because collapsing them would print a lie:
 | --- | --- |
 | `cordis.patch.yml` | exactly one Loader row — the anchor |
 | `src/index.js` | Host anchor; publishes nothing |
-| `src/model.js` | the shared pure module the browser half imports |
-| `src/client.js` | the browser half; registers all three seats |
-| `locale/{en,ro,zh}.json` | dictionaries for namespace `dsh-subagent-model` |
+| `src/model.js` | the pure logic, as plain ESM for the unit suite |
+| `src/client.js` | the browser half; registers all seats |
+| `src/client.model.js` | the same pure logic as a browser chunk the half loads |
+| `src/client.route-history.js` | the `request/header` fold and the per-turn route map |
+| `locale/{en,ro}.json` | dictionaries for namespace `dsh-subagent-model` |
 | `scripts/unit.mjs` | `node --test` suite for `src/model.js` and locale parity |
 | `scripts/check-plugin.mjs` | manifest, patch, exports, browser-half contract |
 
-No build step, no bundler, no transpiler and **no dependency**.
+No build step, no bundler, no transpiler and **no installed dependency** — the
+one declared peer is the runtime this plugin was verified against, and DSH
+resolves it from the installation.
 
-### Why `src/model.js` is inlined rather than imported
+### Why the pure logic lives in a second chunk
 
-A classic script cannot `import`, and the Host serves exactly one file per
-package: the boot graph resolves `exports["./client"]` only
-(`dsh-client-modules/lib/index.js:701-731`), and sibling files are served solely
-under a hard-coded pattern — `CLIENT_CHUNK =
-/^client\.[A-Za-z0-9][A-Za-z0-9._-]*\.js$/` (`:169`, enforced at `:923`).
-`src/model.js` does not match, so it is not reachable at runtime.
+A classic script cannot `import`, but it does not have to: the `require` the
+factory is handed carries an `async` method that fetches a package-local chunk
+(`dsh-client-modules/lib/client.js:707-713`), and `CLIENT_CHUNK =
+/^client\.[A-Za-z0-9][A-Za-z0-9._-]*\.js$/` (`:169`, served at `:915-932`) is the
+pattern that file has to match. Three shipped packages already ship a second
+chunk this way — `dsh-client-ui-sidebar-terminal` and
+`dsh-client-ui-sidebar-documentpreview` — so this is a supported shape, not a
+workaround.
 
-`src/client.js` therefore carries inlined copies of the pure functions, which
-must stay behaviourally identical to `src/model.js`. The unit suite pins this by
-evaluating the browser half under a stub `window.__ModuleLoader__` and asserting
-every inlined function exists; the shared module remains the tested source of
-truth.
+`src/model.js` is a plain ESM module, which no browser script can reach, so
+`src/client.model.js` holds the same functions as a self-registering chunk and
+`src/client.js` loads it once. The duplication was previously the whole cost of
+shipping both; it is now confined to one chunk whose exports are checked against
+`src/model.js`.
+
+Every seat renders nothing until that chunk resolves, which is what keeps a
+failed fetch from taking the conversation header down. The trade is that the chip
+appears a tick later than a sync import would allow; nothing else on the page
+waits on it.
 
 ## The browser half
 
@@ -242,13 +283,15 @@ boot, and reproduces the same failure.
 **`ro` is added to the language catalog.** `en` and `zh` are shipped catalog
 languages; `ro` is not, and the fallback chain walks the catalog rather than the
 registered dictionaries — so a `ro` dictionary alone is unreachable until
-`locale.addLanguage` adds the language.
+`locale.addLanguage` adds the language. Both `locale/en.json` and
+`locale/ro.json` ship the same key set, and `scripts/check-plugin.mjs` fails the
+build if they drift apart.
 
 ## Verify
 
 ```sh
-node --test scripts/unit.mjs    # 63 tests: model logic, cycles, depth grouping, locale parity
-node scripts/check-plugin.mjs   # 26 checks: manifest, patch, exports, browser contract
+node --test scripts/unit.mjs    # 84 tests: model logic, cycles, depth grouping, locale parity
+node scripts/check-plugin.mjs   # 31 checks: manifest, dsh peer range, patch, exports, browser contract
 ```
 
 ## Licence

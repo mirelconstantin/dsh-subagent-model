@@ -35,7 +35,9 @@
     "depth": "gen {depth}",
     "unknownOnly": "model necunoscut",
     "inherited": "{count} au moștenit modelul părintelui",
-    "running": "{count} în execuție acum"
+    "running": "{count} în execuție acum",
+    "efforts": "Eforturi: {efforts}",
+    "effortDefault": "{effort} (implicit)"
   },
   "row": {
     "label": "Model",
@@ -48,11 +50,22 @@
     "steps": "{count} pași",
     "time": "Timp activ",
     "tokens": "Generat",
+    "cache": "Cache provider",
+    "cacheRead": "{count} citite",
+    "cacheWrite": "{count} scrise",
+    "context": "Fereastră de context",
     "task": "Cerință",
     "switch": "Schimbare de rută",
     "switchFrom": "{from} → {to}, încă neaplicat",
     "mode": "Tip",
     "modeOneShot": "one-shot, doar citire",
     "modeContinuable": "continuabil"
+  },
+  "route": {
+    "label": "A rulat pe",
+    "title": "Această tură a rulat pe {model}",
+    "switchedTitle": "Această tură a rulat pe {model}, schimbată de la {from}",
+    "effortDefaulted": "(implicit din adaptor)",
+    "switchedFrom": "(era {from})"
   }
 }

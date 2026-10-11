@@ -9,8 +9,11 @@
     ".": "./src/index.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./client": "./src/client.js",
+    "./client.model.js": "./src/client.model.js",
+    "./client.route-history.js": "./src/client.route-history.js",
     "./model": "./src/model.js",
     "./locale/*.json": "./locale/*.json",
+    "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
   "files": [
@@ -53,12 +56,10 @@
     },
     "client": {
       "platform": "web"
-    },
-    "compatibility": {
-      "dshReleases": {
-        "0.2.0-rc.2": "compatible"
-      }
     }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-app-boot": ">=0.2.0-rc.2 <0.3.0"
   },
   "engines": {
     "node": ">=20"

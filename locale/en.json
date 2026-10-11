@@ -35,7 +35,9 @@
     "depth": "gen {depth}",
     "unknownOnly": "model unknown",
     "inherited": "{count} inherited their parent model",
-    "running": "{count} running now"
+    "running": "{count} running now",
+    "efforts": "Efforts: {efforts}",
+    "effortDefault": "{effort} (default)"
   },
   "row": {
     "label": "Model",
@@ -48,11 +50,22 @@
     "steps": "{count} steps",
     "time": "Active time",
     "tokens": "Generated",
+    "cache": "Cache",
+    "cacheRead": "{count} read",
+    "cacheWrite": "{count} written",
+    "context": "Context window",
     "task": "Task",
     "switch": "Route change",
     "switchFrom": "{from} → {to}, not yet applied",
     "mode": "Kind",
     "modeOneShot": "one-shot, read-only",
     "modeContinuable": "continuable"
+  },
+  "route": {
+    "label": "Ran on",
+    "title": "This turn ran on {model}",
+    "switchedTitle": "This turn ran on {model}, re-routed from {from}",
+    "effortDefaulted": "(adapter default)",
+    "switchedFrom": "(was {from})"
   }
 }

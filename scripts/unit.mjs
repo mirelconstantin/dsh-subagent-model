@@ -23,6 +23,7 @@ import {
   PROJECTION_KEY,
   catalogOf,
   childRouteOf,
+  formatCount,
   formatModelGroup,
   groupRows,
   isLoaded,
@@ -142,6 +143,34 @@ test('shortenModel rejects unusable input', () => {
   assert.equal(shortenModel(null), '')
   assert.equal(shortenModel(undefined), '')
   assert.equal(shortenModel(42), '')
+})
+
+test('formatCount renders whole non-negative counts', () => {
+  assert.equal(formatCount(0), '0')
+  assert.equal(formatCount(1), '1')
+  assert.equal(formatCount(1234), '1234')
+})
+
+test('formatCount refuses values a label cannot decline', () => {
+  // Each of these reaches a call site inside a locale-owned label; rendering one
+  // would print "-3 subagents" or "2.9 subagents" inside text that was written
+  // for a count.
+  assert.equal(formatCount(-3), '')
+  assert.equal(formatCount(2.9), '')
+  assert.equal(formatCount(NaN), '')
+  assert.equal(formatCount(Infinity), '')
+  assert.equal(formatCount(-Infinity), '')
+  assert.equal(formatCount('3'), '')
+  assert.equal(formatCount(null), '')
+  assert.equal(formatCount(undefined), '')
+  assert.equal(formatCount({}), '')
+})
+
+test('formatCount renders a count only when both the total and the noun exist', () => {
+  // The count is substituted into dictionary text such as "{count} subagents",
+  // so an empty rendering must leave a label the dictionary can still speak.
+  assert.notEqual(formatCount(3), '')
+  assert.equal(formatCount(-3), '')
 })
 
 /* ------------------------------------------------------------------ *
@@ -266,11 +295,32 @@ test('childRouteOf reports inherited for a one-shot with no route', () => {
   assert.equal(childRouteOf(identity({ mode: 'one-shot', label: 'child' })).source, 'inherited')
 })
 
-test('childRouteOf returns none for a child with no descriptor route', () => {
-  assert.equal(childRouteOf(identity({ mode: 'continuable', label: 'child' })).source, 'none')
+test('childRouteOf reports inherited for a continuable with no route either', () => {
+  // A continuable descriptor that records no agentModel has no route of its own
+  // to show, so it ran on its parent's — the same fact the one-shot descriptor
+  // reports. Answering 'none' here was what hid the model for continuable
+  // children while one-shot children showed one.
+  assert.equal(childRouteOf(identity({ mode: 'continuable', label: 'child' })).source, 'inherited')
+})
+
+test('childRouteOf gives an unrouted child the same answer in either mode', () => {
+  const oneShot = childRouteOf(identity({ mode: 'one-shot', label: 'child' }))
+  const continuable = childRouteOf(identity({ mode: 'continuable', label: 'child' }))
+  assert.deepEqual(continuable, oneShot)
+})
+
+test('childRouteOf keeps an effort on a descriptor with no model', () => {
+  // A continuable descriptor may carry the effort without the model, which is
+  // exactly the descriptor this change routes to the lineage.
+  const route = childRouteOf(identity({ agentReasoningEffort: 'high' }))
+  assert.equal(route.source, 'inherited')
+  assert.equal(route.effort, 'high')
+  assert.equal(route.model, '')
 })
 
 test('childRouteOf rejects unusable input', () => {
+  // Only the absent-descriptor case is 'none'; a descriptor that is present but
+  // carries no route is 'inherited' in every mode.
   for (const value of [null, undefined, 'x', 7]) {
     assert.equal(childRouteOf(value).source, 'none')
   }
@@ -417,6 +467,42 @@ test('isPending reads a list-row attachment too', () => {
   assert.equal(isPending(value), true)
 })
 
+test('isPending and readProjection agree on every malformed selection', () => {
+  // The two exported predicates read the same snapshot, so a caller that renders
+  // `pending` from one and a chip marker from the other must never contradict
+  // itself. An empty model on either side is not a switch away from a model:
+  // comparing '' against 'chat' used to report a queued switch that no route
+  // could actually explain.
+  const cases = [
+    ['next model empty', snapshot({ provider: 'p', model: '' }, { provider: 'p', model: 'chat' })],
+    ['lastUsed model empty', snapshot({ provider: 'p', model: 'chat' }, { provider: 'p', model: '' })],
+    ['both models empty', snapshot({ provider: 'p', model: '' }, { provider: 'p', model: '' })],
+    ['next selection null', snapshot(null, { provider: 'p', model: 'chat' })],
+    ['next selection undefined', snapshot(undefined, { provider: 'p', model: 'chat' })],
+    ['lastUsed selection null', snapshot({ provider: 'p', model: 'chat' }, null)],
+    ['lastUsed selection undefined', snapshot({ provider: 'p', model: 'chat' }, undefined)],
+    ['selection not an object', { values: { [PROJECTION_KEY]: 'nope' } }],
+    ['selection key absent', { values: {} }],
+    ['values absent entirely', {}],
+    ['snapshot absent entirely', undefined],
+  ]
+
+  for (const [name, value] of cases) {
+    assert.equal(isPending(value), readProjection(value).pending, name)
+  }
+
+  // The specific disagreement that was pinned wrong: a route with no readable
+  // model is not moving away from one.
+  assert.equal(isPending(snapshot({ provider: 'p', model: '' }, { provider: 'p', model: 'chat' })), false)
+})
+
+test('isPending still reports a real queued switch on a malformed neighbour', () => {
+  // A genuinely different pair of readable models is still a switch, so the
+  // empty-model guard does not swallow every disagreement.
+  assert.equal(isPending(snapshot({ provider: 'p', model: 'next' }, { provider: 'p', model: 'used' })), true)
+  assert.equal(isPending(snapshot({ provider: 'p', model: 'chat-preview' }, { provider: 'p', model: 'chat-latest' })), false)
+})
+
 /* ------------------------------------------------------------------ *
  * modelLabelOf and modelOf — the narrow shapes
  * ------------------------------------------------------------------ */
@@ -504,6 +590,95 @@ test('resolveRoute reports an unknown model when no ancestor has one either', ()
   assert.equal(result.model, '')
   assert.equal(result.source, 'inherited')
   assert.equal(result.inheritedFrom, undefined)
+})
+
+test('resolveRoute drops the effort when no ancestor model was found', () => {
+  // A descriptor can carry the effort without the model. Reporting that effort
+  // beside an empty model renders a bare "(high)" naming an effort no ancestor
+  // was found for, so the effort is dropped with the model it belonged to.
+  const projections = {
+    child: { values: { [IDENTITY_KEY]: identity({ agentReasoningEffort: 'high' }) } },
+    parent: { values: { [IDENTITY_KEY]: identity({ agentReasoningEffort: 'high' }) } },
+  }
+  const byId = { parent: {}, child: { parentId: 'parent' } }
+  const result = resolveRoute(projections, byId, 'child')
+  assert.equal(result.model, '')
+  assert.equal(result.effort, '')
+  assert.equal(result.source, 'inherited')
+})
+
+test('resolveRoute walks a continuable child with no route of its own', () => {
+  // The defect this fixes: with model selection off, every child inherits, and
+  // the one-shot children said so while continuable ones reported 'none' and
+  // stopped the walk before it started.
+  const projections = {
+    parent: snapshot({ provider: 'p', model: 'deepseek-chat', reasoningEffort: 'high' }),
+    child: { values: { [IDENTITY_KEY]: identity({ mode: 'continuable', label: 'child' }) } },
+  }
+  const byId = { parent: {}, child: { parentId: 'parent' } }
+  const result = resolveRoute(projections, byId, 'child')
+  assert.equal(result.model, 'deepseek-chat')
+  assert.equal(result.effort, 'high')
+  assert.equal(result.source, 'inherited')
+  assert.equal(result.inheritedFrom, 'parent')
+})
+
+test('resolveRoute names the same model for a continuable and a one-shot child', () => {
+  // Side by side, with only the descriptor's mode differing.
+  const projections = {
+    parent: snapshot({ provider: 'p', model: 'deepseek-chat' }),
+    continuable: { values: { [IDENTITY_KEY]: identity({ mode: 'continuable', label: 'c' }) } },
+    oneShot: { values: { [IDENTITY_KEY]: identity({ mode: 'one-shot', label: 'o' }) } },
+  }
+  const byId = {
+    parent: {},
+    continuable: { parentId: 'parent' },
+    oneShot: { parentId: 'parent' },
+  }
+  const continuableResult = resolveRoute(projections, byId, 'continuable')
+  const oneShotResult = resolveRoute(projections, byId, 'oneShot')
+  assert.equal(continuableResult.model, oneShotResult.model)
+  assert.equal(continuableResult.model, 'deepseek-chat')
+  assert.equal(continuableResult.inheritedFrom, oneShotResult.inheritedFrom)
+  assert.deepEqual(continuableResult, oneShotResult)
+})
+
+test('resolveRoute walks through a parent that has no list row of its own', () => {
+  // The parent is in the resident store but absent from byId: its own parent
+  // link cannot be read, so the walk stops there, but its route is still the
+  // answer. This is a loaded parent whose row the list has not built yet.
+  const projections = {
+    child: { values: { [IDENTITY_KEY]: identity({ mode: 'continuable', label: 'child' }) } },
+    parent: snapshot({ provider: 'p', model: 'deepseek-chat', reasoningEffort: 'high' }),
+  }
+  const byId = { child: { parentId: 'parent' } }
+  const result = resolveRoute(projections, byId, 'child')
+  assert.equal(result.model, 'deepseek-chat')
+  assert.equal(result.effort, 'high')
+  assert.equal(result.source, 'inherited')
+  assert.equal(result.inheritedFrom, 'parent')
+})
+
+test('resolveRoute terminates on a parent chain that points at itself', () => {
+  // A self-loop is not the two-cycle the other test covers: `visited` starts as
+  // the session itself, so the first hop is already a repeat.
+  const projections = {
+    a: { values: { [IDENTITY_KEY]: identity({ mode: 'continuable', label: 'a' }) } },
+  }
+  const byId = { a: { parentId: 'a' } }
+  const result = resolveRoute(projections, byId, 'a')
+  assert.equal(result.model, '')
+  assert.equal(result.source, 'inherited')
+  assert.equal(result.inheritedFrom, undefined)
+})
+
+test('resolveRoute terminates on a self-loop whose own route is explicit', () => {
+  // An own route short-circuits the walk, so the self-loop is never followed.
+  const projections = { a: snapshot({ provider: 'p', model: 'deepseek-chat' }) }
+  const byId = { a: { parentId: 'a' } }
+  const result = resolveRoute(projections, byId, 'a')
+  assert.equal(result.model, 'deepseek-chat')
+  assert.equal(result.source, 'selection')
 })
 
 test('resolveRoute terminates on a cyclic parent chain', () => {
@@ -620,6 +795,76 @@ test('summarizeSubagentModels terminates on a cyclic catalog', () => {
   }
   const summary = summarizeSubagentModels(projections, {}, 'a')
   assert.equal(summary.total, 1)
+})
+
+/* ------------------------------------------------------------------ *
+ * catalogOf
+ * ------------------------------------------------------------------ */
+
+test('catalogOf returns the entries of a loaded parent', () => {
+  const projections = { root: { values: { subagentCatalog: [{ id: 'a' }, { id: 'b' }] } } }
+  assert.deepEqual(catalogOf(projections, 'root'), [{ id: 'a' }, { id: 'b' }])
+})
+
+test('catalogOf tells a childless parent from an unloaded one', () => {
+  // A loaded leaf is an empty array; a session nobody has touched is undefined.
+  // Collapsing the two would make an unopened parent look childless.
+  assert.deepEqual(catalogOf({ root: { values: { subagentCatalog: [] } } }, 'root'), [])
+  assert.equal(catalogOf({ root: { values: {} } }, 'root'), undefined)
+  assert.equal(catalogOf({}, 'root'), undefined)
+})
+
+test('catalogOf returns undefined when the catalog is not an array', () => {
+  assert.equal(catalogOf({ root: { values: { subagentCatalog: null } } }, 'root'), undefined)
+  assert.equal(catalogOf({ root: { values: { subagentCatalog: { id: 'a' } } } }, 'root'), undefined)
+})
+
+test('catalogOf rejects unusable stores', () => {
+  assert.equal(catalogOf(null, 'root'), undefined)
+  assert.equal(catalogOf(undefined, 'root'), undefined)
+  assert.equal(catalogOf({}, null), undefined)
+  assert.equal(catalogOf({}, ''), undefined)
+})
+
+/* ------------------------------------------------------------------ *
+ * groupRows
+ * ------------------------------------------------------------------ */
+
+test('groupRows cuts one grouping and repeats it per depth', () => {
+  const rows = [
+    { depth: 1, route: { model: 'a-model', effort: '' }, running: false },
+    { depth: 1, route: { model: 'a-model', effort: '' }, running: false },
+    { depth: 2, route: { model: 'b-model', effort: '' }, running: true },
+  ]
+  const levels = groupRows(rows)
+  assert.deepEqual(levels.all.map((group) => [group.model, group.count]), [['a-model', 2], ['b-model', 1]])
+  assert.deepEqual(levels.byDepth.map((level) => level.depth), [1, 2])
+  assert.deepEqual(levels.byDepth.map((level) => level.total), [2, 1])
+  assert.equal(levels.byDepth[1].groups[0].running, 1)
+})
+
+test('groupRows orders depths ascending and omits the ones with no rows', () => {
+  // Depth 3 is absent from the rows and must not appear as an empty bucket.
+  const rows = [
+    { depth: 3, route: { model: 'a-model', effort: '' }, running: false },
+    { depth: 1, route: { model: 'a-model', effort: '' }, running: false },
+  ]
+  assert.deepEqual(groupRows(rows).byDepth.map((level) => level.depth), [1, 3])
+})
+
+test('groupRows counts unroutable rows in the depth total but not as a group', () => {
+  const rows = [
+    { depth: 1, route: { model: '', effort: '' }, running: false },
+    { depth: 1, route: { model: '', effort: '' }, running: false },
+    { depth: 1, route: { model: 'a-model', effort: '' }, running: false },
+  ]
+  const levels = groupRows(rows)
+  assert.equal(levels.byDepth[0].total, 3)
+  assert.deepEqual(levels.byDepth[0].groups.map((group) => [group.model, group.count]), [['a-model', 1]])
+})
+
+test('groupRows returns nothing to group for an empty walk', () => {
+  assert.deepEqual(groupRows([]), { all: [], byDepth: [] })
 })
 
 /* ------------------------------------------------------------------ *
