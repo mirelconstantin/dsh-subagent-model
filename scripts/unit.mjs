@@ -712,6 +712,49 @@ test('resolveRoute does not walk past the hop bound', () => {
  * summarizeSubagentModels — grouping subagents by the model they run on
  * ------------------------------------------------------------------ */
 
+test('resolveRoute walks a child the client store knows only as a list row', () => {
+  // The defect this fixes, measured over the real session cache: a subagent listed
+  // in its parent's catalog but never opened has NO resident projection store, so
+  // `resolveModel` reached for `byId[child].projectionValues` — and the list row
+  // carries none for a session that never ran. That returned source 'none', which
+  // `resolveRoute` treats as "owns its route", so the parent walk never happened
+  // and every child reported an empty model. The summary then had total > 0 with
+  // zero groups, and the header chip showed no model beside any subagent.
+  //
+  // A child is a child by lineage, not by which store happens to hold it, so the
+  // absence of a list row's values must not end the walk.
+  const projections = { parent: snapshot({ provider: 'p', model: 'deepseek-chat', reasoningEffort: 'high' }) }
+  const byId = { parent: {}, child: { parentId: 'parent' } }
+  const result = resolveRoute(projections, byId, 'child')
+  assert.equal(result.model, 'deepseek-chat')
+  assert.equal(result.effort, 'high')
+  assert.equal(result.source, 'inherited')
+  assert.equal(result.inheritedFrom, 'parent')
+})
+
+test('summarizeSubagentModels groups children known only as list rows', () => {
+  // The user-visible consequence, on the exact shape a real parent has: a catalog
+  // of children that were never opened. `byId` rows exist (the controller
+  // synthesizes them from the catalog) but carry no projectionValues.
+  const projections = {
+    root: {
+      values: {
+        subagentCatalog: [{ id: 'a' }, { id: 'b' }],
+        [PROJECTION_KEY]: { lastUsed: null, next: { provider: 'p', model: 'deepseek-chat' } },
+      },
+    },
+  }
+  const byId = {
+    root: { origin: 'root' },
+    a: { parentId: 'root', origin: 'subagent' },
+    b: { parentId: 'root', origin: 'subagent' },
+  }
+  const summary = summarizeSubagentModels(projections, byId, 'root')
+  assert.equal(summary.total, 2)
+  assert.equal(summary.groups.length, 1, 'the two children share one inherited model, so they form one group')
+  assert.equal(summary.groups[0].count, 2)
+})
+
 test('summarizeSubagentModels groups descendants and orders by count', () => {
   const projections = {
     root: { values: { subagentCatalog: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }] } },

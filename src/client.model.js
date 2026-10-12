@@ -281,7 +281,16 @@ window.__ModuleLoader__.load({
       const own = resolveModel(projectionsBySession, byId, sessionId)
       // A route the session owns — selected, used, or durable in its descriptor —
       // is always the answer; nothing is inherited while one exists.
-      if (own.source !== 'inherited') return own
+      //
+      // `none` is the OTHER no-own-route case, and it must walk too: a child listed
+      // in its parent's catalog but never opened has no resident projection store,
+      // and its list row carries no `projectionValues` either (the controller only
+      // attaches them once a projection store exists), so `resolveModel` reports
+      // `none` with an empty model. It ran its parent's route all the same, so
+      // without the walk every such child read as "no model" — which is what left
+      // the header chip and the subagent summary showing nothing for them.
+      if (own.source !== 'inherited' && own.source !== 'none') return own
+      if (own.model !== '') return own
 
       const visited = new Set([sessionId])
       let cursor = byId === null || byId === undefined ? undefined : byId[sessionId]
