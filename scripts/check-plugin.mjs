@@ -210,11 +210,39 @@ check('a release is versioned, and the release rules travel with it', async () =
   assert.ok(pkg.files.includes('RELEASING.md'), 'RELEASING.md must be in files')
   assert.ok(pkg.files.includes('AGENTS.md'), 'AGENTS.md must be in files')
 
-  // The install command in the README must name the version that ships, or a
-  // pinned install silently resolves to something older than this tarball.
+  // The README must name the version that ships, or a pinned install silently
+  // resolves to something older than this tarball.
   const readme = await read('README.md')
   assert.ok(readme.includes(pkg.version),
     `README.md must mention the released version ${pkg.version}`)
+})
+
+check('the release publishes over OIDC, with no stored token', async () => {
+  const yml = await read('.github/workflows/release.yml')
+  // npm TRUSTED PUBLISHING, not a long-lived token. `id-token: write` is what
+  // lets GitHub mint the short-lived token npm exchanges for a publish token;
+  // the npm CLI detects the OIDC environment on its own, so the publish step must
+  // carry NO credentials at all.
+  assert.match(yml, /id-token:\s*write/, 'OIDC needs the id-token: write permission')
+  assert.match(yml, /npm publish/, 'the workflow must publish')
+
+  // Comment-free, so the prose that NAMES the secret cannot satisfy the negative
+  // assertions below.
+  const { code } = await views('.github/workflows/release.yml')
+  assert.ok(!/secrets\./.test(code),
+    'the release must not read any repository secret — that is the whole point of OIDC')
+  assert.ok(!/NPM_TOKEN|NPM_READ_TOKEN|NODE_AUTH_TOKEN/.test(code),
+    'no npm token may appear in the workflow')
+
+  // Without the trusted publisher configured on npmjs.com the publish step fails
+  // E401/E403, so the configuration has to be written down where the next person
+  // will read it at the moment it is needed.
+  assert.match(code, /dsh-subagents-model/, 'the workflow must name the package')
+  assert.ok(/release\.yml/.test(yml), 'the workflow must name itself, as npm requires a filename')
+  // Node 22.14.0+ and npm 11.5.1+ are hard requirements for trusted publishing.
+  const node = yml.match(/node-version:\s*(\S+)/)
+  assert.ok(node, 'the workflow must pin a node version')
+  assert.match(node[1], /^'?2[2-9]/, `trusted publishing needs Node >= 22.14.0, got ${node[1]}`)
 })
 
 check('package.json pins the dsh runtime it was verified against', async () => {

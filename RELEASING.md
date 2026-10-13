@@ -60,6 +60,39 @@ cannot drift.
 So the version cannot be wrong at publish time. It can still be *forgotten*
 before the tag, which is why step 1 above comes first.
 
+### Authentication: trusted publishing, no token
+
+Publishing authenticates over **OIDC**, not a stored npm token. The `publish`
+step has no `env:` block and no `secrets.*` reference at all — GitHub mints a
+short-lived, workflow-scoped token and the npm CLI exchanges it automatically. A
+composition check enforces that: `secrets.`, `NPM_TOKEN`, `NPM_READ_TOKEN` and
+`NODE_AUTH_TOKEN` must all be absent from the workflow.
+
+This is deliberate. A long-lived token in repository settings can be leaked, has
+to be rotated, and outlives the machine that created it. The OIDC credential
+cannot be extracted or reused.
+
+**One-time setup, once, on npmjs.com.** The package must exist before a trusted
+publisher can be attached to it, and the configuration is per-package:
+
+1. Publish the package once by any means — `npm publish` from a logged-in
+   machine is fine.
+2. On npmjs.com: **Packages → dsh-subagents-model → Settings → Trusted
+   Publisher → GitHub Actions**, then fill in:
+   - **Organization or user**: `mirelconstantin`
+   - **Repository**: `dsh-subagents-model`
+   - **Workflow filename**: `release.yml` — the filename only, *not* the path
+   - **Environment name**: leave empty
+
+**A trusted-publisher configuration that goes unused expires after two days** and
+can no longer be used or edited. Configure it, then tag within two days; if it
+lapses, delete it and create a fresh one.
+
+After that, every release is the four commands above and nothing else. Optionally
+harden it further at **Settings → Publishing access → "Require two-factor
+authentication and disallow tokens"**, which is safe only once trusted publishing
+is proven working.
+
 ## 2. A release must never need a user to fix their profile
 
 This is the promise the README makes, and it is the promise that was broken four

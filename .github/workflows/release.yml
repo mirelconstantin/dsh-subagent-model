@@ -3,6 +3,16 @@ name: release
 # One publish path, and it is not run by hand. `prepublishOnly` runs the full
 # suite, so a release cannot skip it, and the tag is derived from the version in
 # package.json so the two can never disagree.
+#
+# AUTHENTICATION is npm TRUSTED PUBLISHING (OIDC), not a stored token:
+# `id-token: write` below lets GitHub mint a short-lived, workflow-scoped token
+# that npm exchanges for a publish token. There is no credential on the publish
+# step and no secret in this repo, because a long-lived token is exactly the
+# thing this replaces (docs.npmjs.com/trusted-publishers).
+#
+# npm CLI auto-detects the OIDC environment, so the publish step needs no auth
+# plumbing at all. `--provenance` keeps the statement that ties this artefact to
+# this workflow run.
 on:
   push:
     tags: ['v*']
@@ -12,14 +22,20 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write   # npm provenance via OIDC, no long-lived token in the repo
+      id-token: write   # required for OIDC; without it there is no trusted publish
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
+          # Trusted publishing needs Node >= 22.14.0 and npm >= 11.5.1. The 22.x
+          # line is the floor declared in package.json `engines`, and setup-node
+          # ships npm 11.x with it.
           node-version: 22
           registry-url: https://registry.npmjs.org
+          # Never cache in a release build: a restored node_modules could carry a
+          # lockfile the pack never validated.
+          package-manager-cache: false
 
       - name: the suite must pass before anything ships
         run: npm test
@@ -46,7 +62,15 @@ jobs:
             echo "::warning::$VER is already published; npm will refuse the duplicate"
           fi
 
+      # No `env:` block and no secret. If this fails with E401/E403, the trusted
+      # publisher is not configured for this package — add it on npmjs.com under
+      # Packages -> dsh-subagents-model -> Settings -> Trusted Publisher:
+      #   organization/user : mirelconstantin
+      #   repository        : dsh-subagents-model
+      #   workflow filename : release.yml      (filename only, not the path)
+      #   environment       : (leave empty)
+      # NOTE: a trusted-publisher configuration that goes unused expires after two
+      # days and can no longer be used or edited. Add it, then tag a release
+      # within two days or start over with a fresh configuration.
       - name: publish
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
