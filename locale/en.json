@@ -67,5 +67,10 @@
     "switchedTitle": "This turn ran on {model}, re-routed from {from}",
     "effortDefaulted": "(adapter default)",
     "switchedFrom": "(was {from})"
+  },
+  "dock": {
+    "subagents": "{count} subagents in this run",
+    "subagentsShort": "agents",
+    "panelTitle": "Models used in this run"
   }
 }

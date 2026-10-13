@@ -343,7 +343,7 @@ window.__ModuleLoader__.load({
 
       while (queue.length > 0) {
         const { id, depth } = queue.shift()
-        const entries = catalogOf(projectionsBySession, id)
+        const entries = catalogFor(projectionsBySession, byId, id)
         if (entries === undefined) continue
         for (const entry of entries) {
           if (entry === null || typeof entry !== 'object' || seen.has(entry.id)) continue
@@ -453,6 +453,33 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * One session's direct-children catalog, read from wherever the store holds it.
+     *
+     * `projectionsBySession` is populated LAZILY — a store is created only when a
+     * session is actually opened — so a session that was delegated to but never
+     * opened has no entry there and its catalog lives only on the list row's
+     * `projectionValues`. Reading the projection map alone therefore stopped every
+     * walk at the first child the user had not clicked, which is what made this
+     * plugin show no subagents at all on a cold run. The shipped client reads the
+     * same fallback (`dsh-client-ui-subagent/lib/client.js:71, :200, :816`).
+     *
+     * `undefined` still means "this session's children are unknown", which is a
+     * different fact from a loaded childless leaf (an empty array) and is what
+     * `isKnownLeaf` keys on.
+     *
+     * @param {Record<string, any>} projectionsBySession - `state.projectionsBySession`.
+     * @param {Record<string, any> | undefined} byId - `state.byId`, whose rows carry `projectionValues`.
+     * @param {string} sessionId - Parent whose catalog is requested.
+     * @returns {Array<object> | undefined} The catalog entries, or undefined.
+     */
+    function catalogFor(projectionsBySession, byId, sessionId) {
+      const resident = catalogOf(projectionsBySession, sessionId)
+      if (resident !== undefined) return resident
+      const attached = byId?.[sessionId]?.projectionValues?.subagentCatalog
+      return Array.isArray(attached) ? attached : undefined
+    }
+
+    /**
      * Render one summary line for a tooltip: "3× deepseek-chat, 2× deepseek-reasoner".
      *
      * The multiplication sign is spelled as `×` rather than `x` so the line reads
@@ -542,6 +569,7 @@ window.__ModuleLoader__.load({
       IDENTITY_KEY,
       MAX_PARENT_HOPS,
       PROJECTION_KEY,
+      catalogFor,
       catalogOf,
       childRouteOf,
       formatCount,

@@ -90,6 +90,13 @@ window.__ModuleLoader__.load({
     let Tooltip = null
     let IconSparkleRegular = null
     let createPortal = null
+    // The dock chip's panel helpers. Same guard rule as the rest: an absent
+    // primitive costs the panel's placement and dismissal, never the bar.
+    let useAnchoredPosition = null
+    let useDismissOnOutsidePointer = null
+    /** Stand-in so the hook count stays fixed when a primitive is missing. */
+    const noopAnchoredPosition = () => null
+    const noopDismiss = () => undefined
     // `react-dom` is a confirmed seed word (`dsh-client-modules/lib/client.js:548`,
     // read by the web frontend's boot entry). The tree menu portals through it,
     // because a menu rendered inside the header is clipped by the conversation
@@ -110,6 +117,8 @@ window.__ModuleLoader__.load({
         Tag = typeof primitives.Tag === 'function' ? primitives.Tag : null
         Tooltip = typeof primitives.Tooltip === 'function' ? primitives.Tooltip : null
         IconSparkleRegular = typeof primitives.IconSparkleRegular === 'function' ? primitives.IconSparkleRegular : null
+        useAnchoredPosition = typeof primitives.useAnchoredPosition === 'function' ? primitives.useAnchoredPosition : null
+        useDismissOnOutsidePointer = typeof primitives.useDismissOnOutsidePointer === 'function' ? primitives.useDismissOnOutsidePointer : null
       }
     } catch (e) {
       // A build where the seed is absent must not take the header down with it.
@@ -314,6 +323,10 @@ window.__ModuleLoader__.load({
       'route.switchedTitle': 'This turn ran on {model}, re-routed from {from}',
       'route.effortDefaulted': '(adapter default)',
       'route.switchedFrom': '(was {from})',
+      // The composer-dock chip, owned by the bottom-bar seat.
+      'dock.subagents': '{count} subagents in this run',
+      'dock.subagentsShort': 'agents',
+      'dock.panelTitle': 'Models used in this run',
     }
 
     /** @type {Record<string, string>} */
@@ -383,6 +396,10 @@ window.__ModuleLoader__.load({
       'route.switchedTitle': 'Această tură a rulat pe {model}, schimbată de la {from}',
       'route.effortDefaulted': '(implicit din adaptor)',
       'route.switchedFrom': '(era {from})',
+      // The composer-dock chip, owned by the bottom-bar seat.
+      'dock.subagents': '{count} subagenți în această rulare',
+      'dock.subagentsShort': 'agenți',
+      'dock.panelTitle': 'Modele folosite în această rulare',
     }
 
     /**
@@ -447,6 +464,28 @@ window.__ModuleLoader__.load({
       // model, accented when it carries a DIFFERENT one of its own.
       '.dsh-smt-model{border-radius:var(--dsw-radius-sm);color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-layer-2);text-overflow:ellipsis;white-space:nowrap;flex:none;max-width:132px;overflow:hidden;padding:1px 5px;font-size:11px;line-height:15px}',
       '.dsh-smt-modelDiffers{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);font-weight:500}',
+      // The bottom-bar dock chip. Metrics copied from the ContextMeter trigger it
+      // shares the row with (research/context-meter-anatomy.md §"The trigger"):
+      // the shell's secondary content-font tokens, tabular numerals so the count
+      // does not jitter as it changes, and one hover/open rule so the control
+      // looks active while its panel is open.
+      '.dsh-smd-root{align-items:center;display:inline-flex;position:relative}',
+      '.dsh-smd-trigger{border-radius:var(--dsw-radius-sm);background:0 0;border:0;color:var(--dsw-alias-label-tertiary);cursor:pointer;font-family:inherit;font-size:var(--dsh-content-font-size-secondary,calc(12px + var(--dsh-content-font-delta,0px)));font-variant-numeric:tabular-nums;align-items:center;gap:5px;padding:3px 7px;line-height:calc(18px + var(--dsh-content-font-delta,0px));display:inline-flex;min-height:24px}',
+      '.dsh-smd-trigger:hover,.dsh-smd-trigger:focus-visible,.dsh-smd-triggerOpen{color:var(--dsw-alias-label-primary);outline:none}',
+      '.dsh-smd-trigger svg{flex:none}',
+      '.dsh-smd-value{color:var(--dsw-alias-label-secondary)}',
+      '.dsh-smd-count{opacity:.75}',
+      // The panel follows the shipped menu surface and elevation tokens exactly
+      // (research/context-meter-anatomy.md §"The panel"), because it is portalled
+      // into the same stacking context the ContextMeter's panel uses.
+      '.dsh-smd-panel{z-index:100;box-sizing:border-box;border-radius:var(--dsw-radius-lg);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);width:280px;max-width:min(360px,100vw - 24px);box-shadow:var(--dsw-elevation-prominent);padding:3px;position:fixed;overflow:hidden}',
+      '.dsh-smd-panel:before{content:"";z-index:-1;border-radius:inherit;background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);position:absolute;inset:0}',
+      '.dsh-smd-panelHead{color:var(--dsw-alias-label-caption);padding:5px 7px 3px;font-size:calc(11px + var(--dsh-content-font-delta,0px));line-height:calc(15px + var(--dsh-content-font-delta,0px))}',
+      '.dsh-smd-rows{flex-direction:column;display:flex;gap:1px;min-width:0}',
+      '.dsh-smd-row{align-items:baseline;gap:8px;border-radius:var(--dsw-radius-sm);padding:4px 7px;display:flex}',
+      '.dsh-smd-rowModel{color:var(--dsw-alias-label-primary);text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden;font-size:calc(12px + var(--dsh-content-font-delta,0px));line-height:calc(18px + var(--dsh-content-font-delta,0px))}',
+      '.dsh-smd-rowCount{color:var(--dsw-alias-label-tertiary);flex:none;font-variant-numeric:tabular-nums;font-size:calc(12px + var(--dsh-content-font-delta,0px));line-height:calc(18px + var(--dsh-content-font-delta,0px))}',
+      '.dsh-smd-note{color:var(--dsw-alias-label-tertiary);padding:3px 7px;font-size:calc(11px + var(--dsh-content-font-delta,0px));line-height:calc(15px + var(--dsh-content-font-delta,0px))}',
     ].join('\n')
 
     /**
@@ -1258,21 +1297,31 @@ window.__ModuleLoader__.load({
       const statusMap = readStatus((value) => value)
       const isChild = readSessions((state) => state.byId[sessionId]?.origin === 'subagent')
 
+      // Every session in `byId` is a candidate, NOT only the ones with a
+      // resident store: `projectionsBySession` is populated lazily, so a session
+      // that was never opened has no entry there and its catalog lives only on the
+      // list row's `projectionValues`. Iterating `projections` alone therefore
+      // dropped exactly the sessions the catalog is about. The read itself is the
+      // chunk's `catalogFor`, which is the one rule the chip, the hover row and the
+      // summary walk all use.
       const catalogs = (0, React.useMemo)(() => {
         const result = {}
-        for (const [id, snapshot] of Object.entries(projections ?? {})) {
-          const entries = snapshot?.values?.subagentCatalog
+        for (const id of Object.keys(byId ?? {})) {
+          const snapshot = projections?.[id]
+          const entries = m.catalogFor(projections ?? {}, byId, id)
           result[id] = {
-            state: snapshot?.state === 'idle' ? (Array.isArray(entries) ? 'ready' : 'loading') : snapshot?.state,
+            state: snapshot?.state !== undefined && snapshot.state !== 'idle'
+              ? snapshot.state
+              : (entries === undefined ? 'loading' : 'ready'),
             error: snapshot?.error,
-            entries: (Array.isArray(entries) ? entries : []).map((entry) => ({
+            entries: (entries ?? []).map((entry) => ({
               ...entry,
               activity: (statusMap?.get?.(entry.id)?.running ?? byId?.[entry.id]?.running) === true ? 'running' : 'inactive',
             })),
           }
         }
         return result
-      }, [projections, byId, statusMap])
+      }, [projections, byId, statusMap, m])
 
       const catalog = catalogs[sessionId]
       const [open, setOpen] = React.useState(false)
@@ -1359,7 +1408,7 @@ window.__ModuleLoader__.load({
       // respecting: it can have a populated catalog of its own, so an unguarded
       // walk would resolve a route for every one of its descendants and then
       // render nothing at all.
-      const wanted = !isChild && catalog !== undefined && directCount > 0
+      const wanted = !isChild && directCount > 0
 
       // The model summary rides in the trigger's tooltip, so the headline stays
       // the count the shipped pill always showed. Keyed on the three real
@@ -1380,7 +1429,11 @@ window.__ModuleLoader__.load({
       // hook, before the trigger — so a header with no subagents builds no
       // button, no portal and no tooltip.
       if (isChild) return null
-      if (catalog === undefined || directCount === 0) return null
+      // `catalogs` now carries an entry for every session the store knows, so the
+      // meaningful test is the count: a header with no subagents builds no button,
+      // no portal and no tooltip. This matches the shipped pill, which also draws
+      // nothing for an empty catalog.
+      if (directCount === 0) return null
 
       const triggerTooltip = () => {
         const lines = [t(summary.running > 0 ? 'tip.running' : 'tip.summary', { count: m.formatCount(summary.running > 0 ? runningCount : directCount) })]
@@ -1441,6 +1494,149 @@ window.__ModuleLoader__.load({
             )
           : null,
       )
+    }
+
+    /**
+     * The composer-dock seat — the bottom bar.
+     *
+     * `conversation.composer.dock` is a `kind: "list"`, `scope: "session"` slot
+     * declared at `dsh-client-ui-conversation/lib/client.js:18329-18332` and
+     * rendered in the row BELOW the composer card beside the built-in
+     * ContextMeter (`:17613-17619`). Its shipped occupants are `id: "todo"`
+     * (`order: 0`) and `id: "queue"` (`order: 20`), so a fresh id with a later
+     * order is added beside them and nothing is displaced. That row is the only
+     * persistent bottom surface an external plugin can reach
+     * (`research/router-barslot-surface.md` §1), and it is where the sibling
+     * `dsh-opencode-router` puts its proxy chip
+     * (`plugins/dsh-opencode-router/src/client/index.ts:85-90`), so this half
+     * sits next to a control that is already shaped like the shipped ContextMeter.
+     *
+     * WHY A SECOND PLACE FOR THE SAME FACT. The header chip answers "which model
+     * am I looking at" for the conversation open above; this one answers "which
+     * models is this whole run spending, and is anything different" for the run
+     * as a whole, and it is the seat that survives a scrolled-away header. It
+     * stays silent — renders nothing at all — when the session has no resolved
+     * route or no subagents, so a plain single-model conversation grows no extra
+     * furniture in the bar.
+     */
+    const DOCK_SLOT = 'conversation.composer.dock'
+    const DOCK_SLOT_ID = 'subagent-model-dock'
+    /** After `queue` (20) so the built-in controls keep their positions. */
+    const DOCK_ORDER = 40
+
+    /**
+     * The bottom-bar model readout.
+     *
+     * A real `<button>` with `aria-haspopup="dialog"`, a portalled panel anchored
+     * ABOVE the bar, outside-pointer and Escape dismissal — the ContextMeter's
+     * shape, copied deliberately, because the two share one row and an invented
+     * control next to it reads as a stranger. Every use of an optional primitive
+     * is guarded, so a host missing one costs the panel and never the bar.
+     *
+     * @param {object} props - Session standard props, the bound `t`, and the chunk's exports as `m`.
+     * @returns {object} React element, or null when there is nothing to show.
+     */
+    function ModelDockChip(props) {
+      const { sessionId, useSessions, t, m } = props
+
+      const readSessions = asHook(useSessions)
+      const projections = readSessions((state) => state.projectionsBySession)
+      const byId = readSessions((state) => state.byId)
+
+      const route = m.resolveRoute(projections, byId, sessionId)
+      const summary = (0, React.useMemo)(() => m.summarizeSubagentModels(projections, byId, sessionId), [projections, byId, sessionId])
+
+      const [open, setOpen] = React.useState(false)
+      const rootRef = React.useRef(null)
+      const panelRef = React.useRef(null)
+
+      // Same dismissal contract as the ContextMeter, and for the same reason:
+      // the panel is a menu, so Escape and an outside click have to close it.
+      React.useEffect(() => {
+        if (!open) return undefined
+        const onKeyDown = (event) => {
+          if (event.key === 'Escape') setOpen(false)
+        }
+        document.addEventListener('keydown', onKeyDown)
+        return () => document.removeEventListener('keydown', onKeyDown)
+      }, [open])
+
+      // The panel is anchored above the bar rather than measured here: the dock
+      // sits at the bottom edge of the viewport, so the only direction with room
+      // is up. `useAnchoredPosition` returns null until it has measured, which is
+      // why the panel renders hidden rather than at 0,0.
+      //
+      // Both hooks are called UNCONDITIONALLY, each falling back to a no-op when the
+      // primitive is absent, so the hook count stays fixed across renders and a
+      // host missing one costs the placement and dismissal — never the bar.
+      const position = (useAnchoredPosition ?? noopAnchoredPosition)({
+        open, anchorRef: rootRef, panelRef, side: 'top', gap: 8, margin: 12,
+      });
+      ;(useDismissOnOutsidePointer ?? noopDismiss)(rootRef, open, setOpen, panelRef)
+
+      // Nothing resolved, or a conversation that never delegated: the bar is for
+      // a fact this plugin has, and silence is the honest rendering of its absence.
+      if (!route.loaded || route.model === '') return null
+      if (summary.total === 0) return null
+
+      const title = () => {
+        const headline = route.source === 'inherited'
+          ? t('chip.titleInherited', { model: route.model })
+          : route.effort !== ''
+            ? t('chip.titleWithEffort', { model: route.model, effort: route.effort })
+            : t('chip.title', { model: route.model })
+        return `${headline}\n${t('dock.subagents', { count: m.formatCount(summary.total) })}`
+      }
+
+      // The bar's face is the count of DELEGATIONS, not the parent's model: the
+      // models are what the panel is for, and the count is what the user reads
+      // at a glance while the header scrolls away.
+      const value = m.formatCount(summary.total)
+
+      const trigger = h(
+        'button',
+        {
+          type: 'button',
+          className: open ? 'dsh-smd-trigger dsh-smd-triggerOpen' : 'dsh-smd-trigger',
+          'aria-haspopup': 'dialog',
+          'aria-expanded': open,
+          'aria-label': title(),
+          onClick: () => setOpen((value) => !value),
+        },
+        IconSparkleRegular !== null ? h(IconSparkleRegular, { size: 14 }) : null,
+        h('span', { className: 'dsh-smd-value' }, value),
+        h('span', { className: 'dsh-smd-count' }, t('dock.subagentsShort')),
+      )
+
+      const panel = open && createPortal !== null
+        ? h(
+            portalTarget(),
+            panelRef,
+            {
+              className: 'dsh-smd-panel',
+              role: 'dialog',
+              'aria-label': t('dock.panelTitle'),
+              style: position ?? { visibility: 'hidden', left: 0, top: 0 },
+            },
+            h('div', { className: 'dsh-smd-panelHead' }, t('dock.panelTitle')),
+            h('div', { className: 'dsh-smd-rows' },
+              summary.groups.map((group) => h(
+                'div',
+                { key: `${group.model}|${group.effort}`, className: 'dsh-smd-row' },
+                h('span', { className: 'dsh-smd-rowModel' }, group.model + (group.effort !== '' ? ` (${group.effort})` : '')),
+                h('span', { className: 'dsh-smd-rowCount' }, m.formatCount(group.count)),
+              )),
+            ),
+            summary.inherited > 0
+              ? h('div', { className: 'dsh-smd-note' }, t('tip.inherited', { count: m.formatCount(summary.inherited) }))
+              : null,
+            summary.running > 0
+              ? h('div', { className: 'dsh-smd-note' }, t('tip.running', { count: m.formatCount(summary.running) }))
+              : null,
+          )
+        : null
+
+      return h('span', { ref: rootRef, className: 'dsh-smd-root' }, trigger, panel)
     }
 
     /**
@@ -1657,6 +1853,45 @@ window.__ModuleLoader__.load({
         ? null
         : () => remoteService.modelCatalog()
 
+      // The actions the replaced catalog cell needs in order to still WORK.
+      //
+      // Taking over `subagent-catalog` means taking over its whole component
+      // contract, and navigation is part of that contract: the shipped
+      // `SubagentCatalogAction` receives `openChild`, `openChildAside` and
+      // `refreshProjection` through its registration's `inject`, and a row that
+      // cannot open a subagent is a dropdown that lists things you cannot reach.
+      // So this half supplies the same three, from the same services, with the
+      // same canonical address the shipped dropdown builds
+      // (`dsh-client-ui-subagent/lib/client.js:692-704, :949-962`).
+      //
+      // They are read through `ctx.get` rather than declared on `inject`, for the
+      // reason `loadCatalog` above gives: naming a service parks this half until
+      // that service exists, and the header chip must not wait behind the
+      // workspace/right-sidebar chain to draw. A service that is absent yields
+      // no-op actions instead, so a partial host degrades to a read-only tree
+      // rather than a throwing one.
+      const catalogActions = {
+        openChild: (address) => {
+          const workspace = ctx.get('uiWorkspace')
+          if (workspace !== null && workspace !== undefined && typeof workspace.openSession === 'function') workspace.openSession(address)
+        },
+        openChildAside: (address) => {
+          const right = ctx.get('sidebarRight')
+          if (right === null || right === undefined || typeof right.openResource !== 'function') return
+          const query = new URLSearchParams({ parent: address.parentSessionId, mode: address.mode })
+          right.openResource(
+            `dsh-resource://subagentchat/session/${encodeURIComponent(address.childSessionId)}?${query}`,
+            { kind: 'subagentchat', preferNewPane: true },
+          )
+        },
+        refreshProjection: (parentSessionId) => {
+          const sessions = ctx.get('sessions')
+          if (sessions !== null && sessions !== undefined && typeof sessions.refreshProjections === 'function') {
+            sessions.refreshProjections(parentSessionId)
+          }
+        },
+      }
+
       whenService(ctx, 'locale', (locale) => {
         if (locale === null || typeof locale !== 'object') return
 
@@ -1798,6 +2033,11 @@ window.__ModuleLoader__.load({
                 id: SHADOWED_CELL_ID,
                 priority: SHADOW_PRIORITY,
                 locale: NS,
+                // Load-bearing, not decoration: the three navigation actions are
+                // what let a row actually open a subagent and retry a failed
+                // load. Omitting `inject` here is what made the replaced tree
+                // render rows that could not be clicked open.
+                inject: () => catalogActions,
               },
               withModel(SubagentModelTree),
             )
@@ -1834,6 +2074,34 @@ window.__ModuleLoader__.load({
         } catch (e) {
           // A slot that refuses the registration must leave the shipped
           // schedule row intact rather than half-replacing it.
+        }
+
+        // The bottom-bar chip, registered on the MAIN fiber and not under any
+        // `whileServed` guard: the dock is where a stuck run is noticed, so a
+        // readout that only existed while a settings page was open would be
+        // absent exactly when it is needed. Same shape as the sibling
+        // `dsh-opencode-router` proxy chip
+        // (`plugins/dsh-opencode-router/src/client/index.ts:84-92`).
+        try {
+          slots.inject(DOCK_SLOT, () => {
+            const dispose = slots.register(
+              {
+                name: DOCK_SLOT,
+                id: DOCK_SLOT_ID,
+                order: DOCK_ORDER,
+                locale: NS,
+              },
+              withModel(ModelDockChip),
+            )
+            try {
+              if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'dsh-subagent-model: dock slot')
+            } catch (e) {
+              // The facade already binds the disposer to the calling fiber.
+            }
+            return dispose
+          })
+        } catch (e) {
+          // A host without the dock keeps its three other seats.
         }
       })
     }

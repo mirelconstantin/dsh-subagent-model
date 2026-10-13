@@ -284,15 +284,15 @@ check('src/client.js declares no services', async () => {
 })
 
 /* ------------------------------------------------------------------ *
- * The two seats
+ * The seats
  * ------------------------------------------------------------------ */
 
 check('the additive seats use fresh ids, and only the tree takes a shipped cell', async () => {
   const { code } = await views('src/client.js')
-  // The header chip and the hover row ADD cells, so their ids must be this
-  // plugin's own. The tree is the deliberate exception: it REPLACES
-  // `subagent-catalog` (see the shadowing-priority check below), and it must
-  // name that id through the constant so the takeover is one edit to undo.
+  // The header chip, the hover row and the dock chip ADD cells, so their ids
+  // must be this plugin's own. The tree is the deliberate exception: it
+  // REPLACES `subagent-catalog` (see the shadowing-priority check below), and it
+  // must name that id through the constant so the takeover is one edit to undo.
   const literalIds = [...code.matchAll(/\bid:\s*'([^']+)'/g)].map((m) => m[1])
   for (const id of literalIds) {
     assert.notEqual(id, 'subagent-catalog', 'the shipped cell must be claimed through SHADOWED_CELL_ID')
@@ -301,7 +301,7 @@ check('the additive seats use fresh ids, and only the tree takes a shipped cell'
   // any function parameter list — a bare `\bid:` also matches `rootId,` in a
   // signature.
   const shorthand = [...code.matchAll(/^\s{16}id:\s*([A-Za-z_][A-Za-z0-9_]*),$/gm)].map((m) => m[1])
-  assert.ok(shorthand.length === 3, `all three seats must register exactly one id each (found ${shorthand.length})`)
+  assert.ok(shorthand.length === 4, `all four seats must register exactly one id each (found ${shorthand.length})`)
   for (const name of shorthand) {
     assert.match(code, new RegExp(`^\\s*const ${name} = '`, 'm'), `${name} must be a declared constant`)
   }
@@ -327,7 +327,7 @@ check('both registrations are deferred through slots.inject', async () => {
   // `register` throws when the slot is not yet declared
   // (`dsh-client-ui-slots/lib/index.js:163-165`), so every seat is wrapped.
   const injects = code.match(/slots\.inject\(/g) ?? []
-  assert.ok(injects.length >= 3, 'all three seats must be deferred through slots.inject')
+  assert.ok(injects.length >= 4, 'all four seats must be deferred through slots.inject')
 })
 
 check('the stylesheet injects idempotently', async () => {
@@ -564,6 +564,69 @@ check('the tree owns the shipped catalog cell at a written shadowing priority', 
   assert.ok(!/-9999\b/.test(code), 'SHADOW_PRIORITY must not collide with dsh-subagent-tree, which claims the same cell')
   assert.match(code, /id: SHADOWED_CELL_ID/)
   assert.match(code, /priority: SHADOW_PRIORITY/)
+})
+
+// The two defects that made the plugin render NOTHING at all when enabled. Both
+// are silent regressions — the header simply lost its pills — so each is pinned
+// here against the exact source line that reintroduces it.
+check('the tree builds its catalog from every session row, not only loaded stores', async () => {
+  const { code } = await views('src/client.js')
+  // `projectionsBySession` is populated LAZILY, so a session that was never
+  // opened has no entry there and its catalog lives only on the list row's
+  // `projectionValues`. Iterating the projection map alone therefore dropped
+  // exactly the sessions the catalog is about, and the tree rendered nothing.
+  // The iteration must be driven by `byId`, with the shared fallback reader.
+  const memo = code.slice(code.indexOf('const catalogs = (0, React.useMemo)'))
+  assert.match(memo, /for \(const id of Object\.keys\(byId/, 'the catalog walk must iterate the session rows')
+  assert.ok(
+    !memo.slice(0, memo.indexOf('}, [projections')).includes('Object.entries(projections'),
+    'the catalog walk must not be driven by projectionsBySession alone',
+  )
+  assert.match(memo, /m\.catalogFor\(projections \?\? \{\}, byId, id\)/, 'the catalog walk must use the chunk\'s list-row fallback')
+  // The fallback itself must be pinned in the chunk, or the rule only holds for
+  // the tree: the chip, the hover row and the summary walk all go through it.
+  const chunk = await read('src/client.model.js')
+  assert.match(chunk, /function catalogFor\(projectionsBySession, byId, sessionId\)/)
+  assert.match(chunk, /byId\?\.\[sessionId\]\?\.projectionValues\?\.subagentCatalog/, 'catalogFor must read the list-row attachment')
+  assert.match(chunk, /catalogFor\(projectionsBySession, byId, id\)/, 'the summary walk must use catalogFor')
+})
+
+check('the tree keeps the navigation actions of the cell it replaces', async () => {
+  const { code } = await views('src/client.js')
+  // Taking over `subagent-catalog` takes over its component contract too. The
+  // shipped `SubagentCatalogAction` receives these three through its
+  // registration's `inject` (dsh-client-ui-subagent/lib/client.js:949-974);
+  // without them every row renders but clicking one throws.
+  const block = code.slice(code.indexOf('id: SHADOWED_CELL_ID'), code.indexOf('withModel(SubagentModelTree)'))
+  assert.match(block, /inject: \(\) => catalogActions/, 'the shadowed cell must inject its navigation actions')
+  assert.match(code, /const catalogActions = \{/, 'the navigation actions must be built once')
+  for (const action of ['openChild', 'openChildAside', 'refreshProjection']) {
+    assert.match(code, new RegExp(`${action}: \\(address\\)|${action}: \\(parentSessionId\\)`), `${action} must be supplied`)
+  }
+})
+
+check('the bottom-bar chip occupies the composer dock beside the built-in controls', async () => {
+  const { code } = await views('src/client.js')
+  assert.match(code, /^\s*const DOCK_SLOT = /m)
+  assert.match((await read('src/client.js')), /DOCK_SLOT\s*=\s*'conversation\.composer\.dock'/)
+  // `todo` sits at order 0 and `queue` at 20
+  // (dsh-client-ui-conversation/lib/client.js:17748-17759, :15668-15697), so the
+  // chip must sort after both to avoid displacing a shipped occupant.
+  const order = code.match(/^\s*const DOCK_ORDER = (\d+)$/m)
+  assert.ok(order, 'src/client.js must declare a numeric DOCK_ORDER')
+  assert.ok(Number(order[1]) > 20, 'the dock chip must sort after the shipped todo and queue cells')
+  assert.match(code, /id: DOCK_SLOT_ID/)
+  assert.match(code, /order: DOCK_ORDER/)
+  // The trigger is a real button with a dialog popup, because the two controls
+  // share one row with the ContextMeter and an invented shape reads as a
+  // stranger (research/context-meter-anatomy.md).
+  assert.match(code, /function ModelDockChip\(props\)/)
+  assert.match(code, /'aria-haspopup': 'dialog'/)
+  assert.match(code, /useAnchoredPosition/)
+  // Both hooks fall back rather than being called conditionally, or the hook
+  // count changes between renders of one mounted component.
+  assert.match(code, /\(useAnchoredPosition \?\? noopAnchoredPosition\)/)
+  assert.match(code, /\(useDismissOnOutsidePointer \?\? noopDismiss\)/)
 })
 
 check('the route marker stays silent when nothing distinguishes the child', async () => {

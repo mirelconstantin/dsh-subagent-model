@@ -67,5 +67,10 @@
     "switchedTitle": "Această tură a rulat pe {model}, schimbată de la {from}",
     "effortDefaulted": "(implicit din adaptor)",
     "switchedFrom": "(era {from})"
+  },
+  "dock": {
+    "subagents": "{count} subagenți în această rulare",
+    "subagentsShort": "agenți",
+    "panelTitle": "Modele folosite în această rulare"
   }
 }
