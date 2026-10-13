@@ -122,6 +122,7 @@ const {
   readRoute,
   resolveModel,
   resolveRoute,
+  rollUpByModel,
   shortenModel,
   summarizeSubagentModels,
 } = loadChunkExports()
@@ -146,6 +147,7 @@ export {
   readRoute,
   resolveModel,
   resolveRoute,
+  rollUpByModel,
   shortenModel,
   summarizeSubagentModels,
 }

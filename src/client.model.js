@@ -370,9 +370,14 @@ window.__ModuleLoader__.load({
 
       return {
         groups,
+        models: rollUpByModel(groups),
         total: rows.length,
         distinct: groups.length,
         inherited: rows.reduce((sum, row) => sum + (row.route.source === 'inherited' ? 1 : 0), 0),
+        // Descendants whose model is not readable anywhere in their lineage. They
+        // are counted in `total` but cannot appear as a model row, so the panel
+        // states the gap rather than letting the rows look like the whole story.
+        unrouted: rows.reduce((sum, row) => sum + (row.route.model === '' ? 1 : 0), 0),
         running: rows.reduce((sum, row) => sum + (row.running ? 1 : 0), 0),
         byDepth: levels.byDepth,
       }
@@ -411,6 +416,40 @@ window.__ModuleLoader__.load({
       }
 
       return { all: orderGroups(rows), byDepth }
+    }
+
+    /**
+     * Collapse the model+effort groups into one entry per MODEL.
+     *
+     * `orderGroups` splits on model AND effort, which is right for a tooltip —
+     * "3× deepseek-reasoner (high), 2× deepseek-reasoner" is the precise fact — but
+     * wrong for a panel that lists MODELS: a run where the same model was used at
+     * two efforts would show that model twice, on adjacent rows, looking like two
+     * different models. This is the shape a reader expects: one row per model,
+     * with its efforts named on the row.
+     *
+     * Order is preserved from `groups`, which is already count-descending, so the
+     * busiest model stays first.
+     *
+     * @param {Array<{model: string, effort: string, count: number, running: number}>} groups
+     *   The model+effort groups.
+     * @returns {Array<{model: string, count: number, running: number, efforts: Array<{effort: string, count: number}>}>}
+     *   One entry per model, busiest first, each naming its efforts in the order
+     *   they first appeared.
+     */
+    function rollUpByModel(groups) {
+      const byModel = new Map()
+      for (const group of groups) {
+        let entry = byModel.get(group.model)
+        if (entry === undefined) {
+          entry = { model: group.model, count: 0, running: 0, efforts: [] }
+          byModel.set(group.model, entry)
+        }
+        entry.count += group.count
+        entry.running += group.running
+        entry.efforts.push({ effort: group.effort, count: group.count })
+      }
+      return [...byModel.values()]
     }
 
     /**
@@ -595,6 +634,7 @@ window.__ModuleLoader__.load({
       readRoute,
       resolveModel,
       resolveRoute,
+      rollUpByModel,
       shortenModel,
       summarizeSubagentModels,
     }

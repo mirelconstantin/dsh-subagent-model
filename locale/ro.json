@@ -42,6 +42,10 @@
   "dock": {
     "subagents": "{count} subagenți în această rulare",
     "subagentsShort": "agenți",
-    "panelTitle": "Modele folosite în această rulare"
+    "panelTitle": "Modele folosite în această rulare",
+    "figures": "{used} din {total} pe rută explicită",
+    "barLabel": "Procentul de subagenți pe model",
+    "effortDefault": "efort implicit",
+    "runningBadge": "{count} în execuție"
   }
 }

@@ -272,6 +272,10 @@ window.__ModuleLoader__.load({
       'dock.subagents': '{count} subagents in this run',
       'dock.subagentsShort': 'agents',
       'dock.panelTitle': 'Models used in this run',
+      'dock.figures': '{used} of {total} on an explicit route',
+      'dock.barLabel': 'Share of subagents per model',
+      'dock.effortDefault': 'default effort',
+      'dock.runningBadge': '{count} running',
     }
 
     /** @type {Record<string, string>} */
@@ -318,6 +322,10 @@ window.__ModuleLoader__.load({
       'dock.subagents': '{count} subagenți în această rulare',
       'dock.subagentsShort': 'agenți',
       'dock.panelTitle': 'Modele folosite în această rulare',
+      'dock.figures': '{used} din {total} pe rută explicită',
+      'dock.barLabel': 'Procentul de subagenți pe model',
+      'dock.effortDefault': 'efort implicit',
+      'dock.runningBadge': '{count} în execuție',
     }
 
     /**
@@ -352,23 +360,49 @@ window.__ModuleLoader__.load({
       // the shell's secondary content-font tokens, tabular numerals so the count
       // does not jitter as it changes, and one hover/open rule so the control
       // looks active while its panel is open.
-      '.dsh-smd-root{align-items:center;display:inline-flex;position:relative}',
-      '.dsh-smd-trigger{border-radius:var(--dsw-radius-sm);background:0 0;border:0;color:var(--dsw-alias-label-tertiary);cursor:pointer;font-family:inherit;font-size:var(--dsh-content-font-size-secondary,calc(12px + var(--dsh-content-font-delta,0px)));font-variant-numeric:tabular-nums;align-items:center;gap:5px;padding:3px 7px;line-height:calc(18px + var(--dsh-content-font-delta,0px));display:inline-flex;min-height:24px}',
-      '.dsh-smd-trigger:hover,.dsh-smd-trigger:focus-visible,.dsh-smd-triggerOpen{color:var(--dsw-alias-label-primary);outline:none}',
+      // The trigger is the ContextMeter's trigger, rule for rule
+      // (dsh-client-ui-conversation/lib/client.js:16923). One colour for the WHOLE
+      // label — `label-tertiary` — with no per-span override, so "3" and "agents"
+      // read as one piece of text at the same weight as the meter beside it. The
+      // earlier `--dsw-alias-label-secondary` on the value plus an `opacity` on the
+      // label made this chip look like a different kind of control sitting in a row
+      // of its own kind. Hover and open share ONE rule and add the same
+      // `interactive-bg-hover` pill the meter uses.
+      '.dsh-smd-root{flex:none;display:inline-flex}',
+      '.dsh-smd-trigger{border-radius:var(--dsw-radius-sm);color:var(--dsw-alias-label-tertiary);background:0 0;border:0;cursor:pointer;font-family:inherit;font-size:var(--dsh-content-font-size-secondary,13px);font-variant-numeric:tabular-nums;line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px));white-space:nowrap;align-items:center;gap:6px;padding:1px 8px;flex:none;display:inline-flex}',
+      '.dsh-smd-trigger:hover,.dsh-smd-trigger:focus-visible,.dsh-smd-trigger[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);outline:none}',
       '.dsh-smd-trigger svg{flex:none}',
-      '.dsh-smd-value{color:var(--dsw-alias-label-secondary)}',
-      '.dsh-smd-count{opacity:.75}',
+      // No colour of its own: the label rides the trigger's colour so the count and
+      // the word cannot drift apart.
+      '.dsh-smd-value{font-variant-numeric:tabular-nums}',
+      '.dsh-smd-count{color:inherit}',
       // The panel follows the shipped menu surface and elevation tokens exactly
       // (research/context-meter-anatomy.md §"The panel"), because it is portalled
       // into the same stacking context the ContextMeter's panel uses.
       '.dsh-smd-panel{z-index:100;box-sizing:border-box;border-radius:var(--dsw-radius-lg);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);width:280px;max-width:min(360px,100vw - 24px);box-shadow:var(--dsw-elevation-prominent);padding:3px;position:fixed;overflow:hidden}',
       '.dsh-smd-panel:before{content:"";z-index:-1;border-radius:inherit;background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);position:absolute;inset:0}',
-      '.dsh-smd-panelHead{color:var(--dsw-alias-label-caption);padding:5px 7px 3px;font-size:calc(11px + var(--dsh-content-font-delta,0px));line-height:calc(15px + var(--dsh-content-font-delta,0px))}',
-      '.dsh-smd-rows{flex-direction:column;display:flex;gap:1px;min-width:0}',
-      '.dsh-smd-row{align-items:baseline;gap:8px;border-radius:var(--dsw-radius-sm);padding:4px 7px;display:flex}',
-      '.dsh-smd-rowModel{color:var(--dsw-alias-label-primary);text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden;font-size:calc(12px + var(--dsh-content-font-delta,0px));line-height:calc(18px + var(--dsh-content-font-delta,0px))}',
-      '.dsh-smd-rowCount{color:var(--dsw-alias-label-tertiary);flex:none;font-variant-numeric:tabular-nums;font-size:calc(12px + var(--dsh-content-font-delta,0px));line-height:calc(18px + var(--dsh-content-font-delta,0px))}',
-      '.dsh-smd-note{color:var(--dsw-alias-label-tertiary);padding:3px 7px;font-size:calc(11px + var(--dsh-content-font-delta,0px));line-height:calc(15px + var(--dsh-content-font-delta,0px))}',
+      '.dsh-smd-panelHead{align-items:baseline;color:var(--dsw-alias-label-tertiary);gap:8px;padding:6px 10px 3px;display:flex;font-size:calc(11px + var(--dsh-content-font-delta,0px));line-height:calc(15px + var(--dsh-content-font-delta,0px))}',
+      '.dsh-smd-figures{color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums;font-weight:500;margin-left:auto}',
+      // The ContextMeter's bar: a 4px rounded track, 1px gaps, children that are
+      // pure width percentages. A zero-width segment is never rendered, because
+      // `min-width: 2px` would otherwise draw a hairline that reads as a filled
+      // slice at 0%.
+      '.dsh-smd-bar{corner-shape:round;background:var(--dsw-alias-interactive-bg-hover);border-radius:999px;gap:1px;height:4px;margin:2px 10px 10px;display:flex;overflow:hidden}',
+      '.dsh-smd-segment{background:var(--dsw-alias-label-tertiary);border-radius:1px;flex:none;min-width:2px;height:100%}',
+      // The busiest model takes the primary tint so the eye lands on what spent
+      // the most. This is a proportion read, not a ranking, so the rest stay
+      // neutral rather than becoming a colour scale.
+      '.dsh-smd-segment[data-dominant=true]{background:var(--dsw-alias-label-secondary)}',
+      '.dsh-smd-rows{flex-direction:column;display:flex;gap:1px;padding:0 4px;min-width:0}',
+      '.dsh-smd-row{align-items:center;gap:8px;border-radius:var(--dsw-radius-sm);padding:4px 6px;display:flex}',
+      '.dsh-smd-dot{flex:none;border-radius:50%;width:6px;height:6px;background:var(--dsw-alias-border-l1)}',
+      '.dsh-smd-dot[data-running=true]{background:var(--dsw-alias-state-success-primary)}',
+      '.dsh-smd-rowLabel{flex:auto;min-width:0}',
+      '.dsh-smd-rowModel{color:var(--dsw-alias-label-primary);text-overflow:ellipsis;white-space:nowrap;min-width:0;display:block;overflow:hidden;font-size:calc(12px + var(--dsh-content-font-delta,0px));line-height:calc(17px + var(--dsh-content-font-delta,0px))}',
+      '.dsh-smd-rowSub{color:var(--dsw-alias-label-caption);text-overflow:ellipsis;white-space:nowrap;min-width:0;display:block;overflow:hidden;font-size:calc(11px + var(--dsh-content-font-delta,0px));line-height:calc(15px + var(--dsh-content-font-delta,0px))}',
+      '.dsh-smd-badge{color:var(--dsw-alias-state-success-primary);flex:none;font-size:calc(10px + var(--dsh-content-font-delta,0px));line-height:calc(14px + var(--dsh-content-font-delta,0px))}',
+      '.dsh-smd-rowCount{color:var(--dsw-alias-label-tertiary);flex:none;font-variant-numeric:tabular-nums;font-size:calc(12px + var(--dsh-content-font-delta,0px));line-height:calc(17px + var(--dsh-content-font-delta,0px))}',
+      '.dsh-smd-note{color:var(--dsw-alias-label-caption);padding:3px 10px;font-size:calc(11px + var(--dsh-content-font-delta,0px));line-height:calc(15px + var(--dsh-content-font-delta,0px))}',
     ].join('\n')
 
     /**
@@ -934,20 +968,32 @@ window.__ModuleLoader__.load({
       // at a glance while the header scrolls away.
       const value = m.formatCount(summary.total)
 
-      const trigger = h(
+      // The trigger, wrapped in the same Tooltip the ContextMeter uses
+      // (dsh-client-ui-conversation/lib/client.js:17044-17048): side `top` because
+      // the dock is at the bottom edge, and `disabled` while open so the bubble
+      // does not fight the panel. The label is the LAZY `title` thunk, so the
+      // summary walk it performs only runs when the bubble is actually positioned.
+      const button = h(
         'button',
         {
           type: 'button',
-          className: open ? 'dsh-smd-trigger dsh-smd-triggerOpen' : 'dsh-smd-trigger',
+          // Open state rides `aria-expanded`, as the ContextMeter does — one
+          // styling hook that assistive technology already reads, instead of a
+          // second class that has to be kept in step with the boolean.
+          className: 'dsh-smd-trigger',
           'aria-haspopup': 'dialog',
           'aria-expanded': open,
           'aria-label': title(),
-          onClick: () => setOpen((value) => !value),
+          onClick: () => setOpen((wasOpen) => !wasOpen),
         },
         IconSparkleRegular !== null ? h(IconSparkleRegular, { size: 14 }) : null,
         h('span', { className: 'dsh-smd-value' }, value),
         h('span', { className: 'dsh-smd-count' }, t('dock.subagentsShort')),
       )
+
+      const trigger = Tooltip !== null
+        ? h(Tooltip, { label: title, side: 'top', delayMs: 200, disabled: open, maxWidth: 320 }, button)
+        : button
 
       // `createPortal(children, container)` — the CHILDREN first, then the
       // container. This used to call `h(container, ref, props, …)`, which throws
@@ -967,20 +1013,62 @@ window.__ModuleLoader__.load({
                 'aria-label': t('dock.panelTitle'),
                 style: position ?? { visibility: 'hidden', left: 0, top: 0 },
               },
-              h('div', { className: 'dsh-smd-panelHead' }, t('dock.panelTitle')),
+              // The panel body. One row per MODEL, not per model+effort: `orderGroups` splits
+              // on both, which is right for the tooltip's precision but would show
+              // `deepseek-reasoner` on two adjacent rows for a run that used it at
+              // `high` and at the default. `rollUpByModel` collapses that and names
+              // the efforts on the row instead.
+              //
+              // The bar and the row layout are the ContextMeter's, because that
+              // panel is the one sitting in the same dock row
+              // (dsh-client-ui-conversation/lib/client.js:16923): a 4px rounded
+              // track, one width-percent segment per group, and a zero-width
+              // segment filtered out so `min-width` cannot draw a sliver.
+              h('div', { className: 'dsh-smd-panelHead' },
+                h('span', null, t('dock.panelTitle')),
+                h('span', { className: 'dsh-smd-figures' },
+                  t('dock.figures', { used: m.formatCount(summary.total - summary.inherited - summary.unrouted), total: m.formatCount(summary.total) }),
+                ),
+              ),
+              summary.models.length > 1
+                ? h(
+                    'div',
+                    { className: 'dsh-smd-bar', role: 'img', 'aria-label': t('dock.barLabel') },
+                    summary.models.map((entry) => h('div', {
+                      key: entry.model,
+                      className: 'dsh-smd-segment',
+                      'data-dominant': summary.models[0].model === entry.model ? 'true' : undefined,
+                      style: { width: `${(entry.count / summary.total) * 100}%` },
+                    })),
+                  )
+                : null,
               h('div', { className: 'dsh-smd-rows' },
-                summary.groups.map((group) => h(
+                summary.models.map((entry) => h(
                   'div',
-                  { key: `${group.model}|${group.effort}`, className: 'dsh-smd-row' },
-                  h('span', { className: 'dsh-smd-rowModel' }, group.model + (group.effort !== '' ? ` (${group.effort})` : '')),
-                  h('span', { className: 'dsh-smd-rowCount' }, m.formatCount(group.count)),
+                  { key: entry.model, className: 'dsh-smd-row' },
+                  // A running dot rides the row, so "which model is working now"
+                  // needs no cross-reference with the footnote.
+                  h('span', { className: 'dsh-smd-dot', 'data-running': entry.running > 0 ? 'true' : 'false', 'aria-hidden': true }),
+                  h('span', { className: 'dsh-smd-rowLabel' },
+                    h('span', { className: 'dsh-smd-rowModel' }, entry.model),
+                    entry.efforts.some((e) => e.effort !== '')
+                      ? h('span', { className: 'dsh-smd-rowSub' },
+                        entry.efforts
+                          .map((e) => (e.effort === '' ? t('dock.effortDefault') : e.effort))
+                          .join(' · '))
+                      : null,
+                  ),
+                  entry.running > 0
+                    ? h('span', { className: 'dsh-smd-badge' }, t('dock.runningBadge', { count: m.formatCount(entry.running) }))
+                    : null,
+                  h('span', { className: 'dsh-smd-rowCount' }, m.formatCount(entry.count)),
                 )),
               ),
               summary.inherited > 0
                 ? h('div', { className: 'dsh-smd-note' }, t('tip.inherited', { count: m.formatCount(summary.inherited) }))
                 : null,
-              summary.running > 0
-                ? h('div', { className: 'dsh-smd-note' }, t('tip.running', { count: m.formatCount(summary.running) }))
+              summary.unrouted > 0
+                ? h('div', { className: 'dsh-smd-note' }, t('tip.unknownOnly', { count: m.formatCount(summary.unrouted) }))
                 : null,
             ),
             portalTarget(),

@@ -42,6 +42,10 @@
   "dock": {
     "subagents": "{count} subagents in this run",
     "subagentsShort": "agents",
-    "panelTitle": "Models used in this run"
+    "panelTitle": "Models used in this run",
+    "figures": "{used} of {total} on an explicit route",
+    "barLabel": "Share of subagents per model",
+    "effortDefault": "default effort",
+    "runningBadge": "{count} running"
   }
 }

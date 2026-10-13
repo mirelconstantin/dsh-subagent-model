@@ -755,6 +755,66 @@ test('summarizeSubagentModels groups children known only as list rows', () => {
   assert.equal(summary.groups[0].count, 2)
 })
 
+test('summarizeSubagentModels reports children whose model is unreadable', () => {
+  // A child with no selection projection anywhere in its lineage cannot be placed
+  // on any model row. It still counts in `total`, so without `unrouted` the panel's
+  // rows would look like the whole story while silently omitting it.
+  const projections = { root: { values: { subagentCatalog: [{ id: 'a' }] } } }
+  const byId = { root: { origin: 'root' }, a: { parentId: 'root', origin: 'subagent' } }
+  const summary = summarizeSubagentModels(projections, byId, 'root')
+  assert.equal(summary.total, 1, 'the unroutable child is still a descendant')
+  assert.equal(summary.unrouted, 1)
+  assert.equal(summary.models.length, 0, 'and it forms no model row')
+})
+
+test('the model roll-up collapses one model used at several efforts', () => {
+  // The panel lists MODELS. `orderGroups` splits on model AND effort, so a run
+  // that used deepseek-reasoner at `high` and at the default would otherwise show
+  // that model on two adjacent rows, reading as two different models.
+  const projections = {
+    root: { values: { subagentCatalog: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] } },
+    a: { values: { [PROJECTION_KEY]: { lastUsed: null, next: { provider: 'p', model: 'deepseek-reasoner', reasoningEffort: 'high' } } } },
+    b: { values: { [PROJECTION_KEY]: { lastUsed: null, next: { provider: 'p', model: 'deepseek-reasoner' } } } },
+    c: { values: { [PROJECTION_KEY]: { lastUsed: null, next: { provider: 'p', model: 'deepseek-chat' } } } },
+  }
+  const byId = {
+    root: { origin: 'root' },
+    a: { parentId: 'root', origin: 'subagent', running: false },
+    b: { parentId: 'root', origin: 'subagent', running: true },
+    c: { parentId: 'root', origin: 'subagent', running: false },
+  }
+  const summary = summarizeSubagentModels(projections, byId, 'root')
+
+  assert.equal(summary.groups.length, 3, 'the precise model+effort view keeps them apart')
+  assert.equal(summary.models.length, 2, 'the roll-up names each model once')
+  const reasoner = summary.models.find((entry) => entry.model === 'deepseek-reasoner')
+  assert.ok(reasoner, 'deepseek-reasoner must appear in the roll-up')
+  assert.equal(reasoner.count, 2, 'both efforts count toward the one model')
+  assert.equal(reasoner.running, 1, 'and the running child is counted against it')
+  assert.deepEqual(reasoner.efforts.map((e) => e.effort), ['high', ''],
+    'both efforts are named, in first-appearance order')
+  // Busiest first, which is what the bar and the row order rely on.
+  assert.equal(summary.models[0].model, 'deepseek-reasoner')
+  assert.equal(summary.unrouted, 0)
+})
+
+test('the model roll-up keeps one entry for a model used at one effort', () => {
+  const projections = {
+    root: { values: { subagentCatalog: [{ id: 'a' }, { id: 'b' }] } },
+    a: { values: { [PROJECTION_KEY]: { lastUsed: null, next: { provider: 'p', model: 'deepseek-chat' } } } },
+    b: { values: { [PROJECTION_KEY]: { lastUsed: null, next: { provider: 'p', model: 'deepseek-chat' } } } },
+  }
+  const byId = {
+    root: { origin: 'root' },
+    a: { parentId: 'root', origin: 'subagent', running: false },
+    b: { parentId: 'root', origin: 'subagent', running: false },
+  }
+  const summary = summarizeSubagentModels(projections, byId, 'root')
+  assert.equal(summary.models.length, 1)
+  assert.equal(summary.models[0].count, 2)
+  assert.deepEqual(summary.models[0].efforts.map((e) => e.effort), [''])
+})
+
 test('summarizeSubagentModels groups descendants and orders by count', () => {
   const projections = {
     root: { values: { subagentCatalog: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }] } },
