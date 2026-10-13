@@ -62,9 +62,9 @@ running runtime is skipped at boot with a warning naming the mismatch.
 | Route | Command |
 | --- | --- |
 | npm, the default | `dsh plugin add dsh-subagents-model` |
-| Pinned to a version | `dsh plugin add dsh-subagents-model@1.2.0` |
+| Pinned to a version | `dsh plugin add dsh-subagents-model@1.2.1` |
 | Pinned to a commit | `dsh plugin add github:mirelconstantin/dsh-subagents-model#<sha>` |
-| Tarball | `dsh plugin add ./dsh-subagents-model-1.2.0.tgz` |
+| Tarball | `dsh plugin add ./dsh-subagents-model-1.2.1.tgz` |
 | Local checkout | `dsh plugin add /absolute/path/to/dsh-subagents-model` |
 
 A `file:` or local-path install hard-links the package directory, so an editor
