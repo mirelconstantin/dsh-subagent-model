@@ -1,8 +1,8 @@
 /**
- * dsh-subagent-model — the pure model-reading logic, as a package-local chunk.
+ * dsh-subagents-model — the pure model-reading logic, as a package-local chunk.
  *
  * Served verbatim by the Host beside `src/client.js` at
- * `/plugins/dsh-subagent-model/client.model.js` and executed as a CLASSIC script:
+ * `/plugins/dsh-subagents-model/client.model.js` and executed as a CLASSIC script:
  * no bundler and no transpile step in front of it, so this body uses no `import`,
  * no `export` and no JSX. It is fetched through `require.async('./client.model.js')`
  * from the main half's factory (`dsh-client-modules/lib/client.js:707-713`), and
@@ -23,7 +23,7 @@
  * The module header that documents the projection these functions read is
  * `src/model.js`, which this chunk's contents used to duplicate.
  *
- * @module dsh-subagent-model/client.model
+ * @module dsh-subagents-model/client.model
  */
 
 window.__ModuleLoader__.load({
@@ -32,12 +32,12 @@ window.__ModuleLoader__.load({
   // The runtime derives the module-table key itself as `chunkId(ownerId, chunk)`
   // = `${id}/${chunk}` (`dsh-client-modules/lib/client.js:476-478`, and the same
   // at `:572`), so putting the path in `id` registered this chunk under
-  // `dsh-subagent-model/client.model.js/client.model.js` — a key no
+  // `dsh-subagents-model/client.model.js/client.model.js` — a key no
   // `require.async('./client.model.js')` ever looks up. That request then
   // rejected, `apply` swallowed it, `modelChunk` stayed null, and `withModel`
   // rendered null for EVERY seat: no header chip, no bottom-bar chip, no hover
   // row, and nothing on screen to say why.
-  id: 'dsh-subagent-model',
+  id: 'dsh-subagents-model',
   chunk: 'client.model.js',
   factory: (require) => {
     var module = { exports: {} };

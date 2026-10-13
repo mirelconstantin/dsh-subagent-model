@@ -1,22 +1,25 @@
-# dsh-subagent-model — surfaces the LLM model a Session actually runs on.
+# dsh-subagents-model — surfaces the LLM model a Session actually runs on.
 #
-# Two seats, both presentation-only:
+# Three seats, all presentation-only, each ADDING a cell with its own id so no
+# shipped occupant is displaced:
 #
 #   1. `conversation.session.header.actions` — a chip beside the session title
 #      reading "model: <id>". A `kind: "list"` slot declared at
 #      `dsh-client-ui-conversation/lib/client.js:18268-18271`, already carrying
 #      the subagent catalog, the job list, the agent-preset label and the Agent
-#      Team action (dsh-cordis-client-runner/lib/client.js:3544-3549). A fresh
-#      `id` ADDS a cell rather than replacing one, which is what this wants:
-#      the shipped pill stays.
+#      Team action (dsh-cordis-client-runner/lib/client.js:3544-3549).
 #
-#   2. `sidebar.session.row.hover` — a row inside each Session's hover card,
+#   2. `conversation.composer.dock` — a chip in the row BELOW the composer beside
+#      the ContextMeter, showing which models a whole run delegated to. Declared at
+#      `dsh-client-ui-conversation/lib/client.js:18329-18332`; its shipped
+#      occupants are `todo` (order 0) and `queue` (order 20).
+#
+#   3. `sidebar.session.row.hover` — a row inside each Session's hover card,
 #      between its relative time and its trailing status line. Declared as
 #      `kind: "list"` by `dsh-client-ui-workspace/lib/client.js:4322-4325` and
 #      described at dsh-cordis-client-runner/lib/client.js:5636-5639. Its
 #      shipped occupant is the schedule row
-#      (`dsh-client-ui-schedule/lib/client.js:6855-6861`), so a fresh `id` adds
-#      a second row beside it.
+#      (`dsh-client-ui-schedule/lib/client.js:6855-6861`).
 #
 # The Host row exists for one reason: `@deepseek-ai/dsh-client-modules`
 # discovers client packages by scanning the HOST Loader's live entries
@@ -32,6 +35,10 @@
 # (`:541-544`), which FAILS the `dsh-client-modules` fiber and leaves the whole
 # web shell without its `window.__ModuleLoader__` bootstrap — a whole-GUI-down
 # failure, not a degraded one.
+#
+# The `id` below is the LOADER ROW id, which is independent of the package name:
+# it names a row in the composition, not a package. Renaming the package does not
+# change it, and it must not be changed to match — nothing else references it.
 #
 # This package must NOT declare a tool, a service, or a Config schema. It
 # touches nothing the model can observe.

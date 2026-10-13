@@ -1,5 +1,5 @@
 /**
- * dsh-subagent-model — composition checks, no DSH runtime required.
+ * dsh-subagents-model — composition checks, no DSH runtime required.
  *
  * Run: `node scripts/check-plugin.mjs`
  *
@@ -159,7 +159,7 @@ function exportedNames(source) {
 
 check('package.json declares the bundle patch and the client export', async () => {
   const pkg = JSON.parse(await read('package.json'))
-  assert.equal(pkg.name, 'dsh-subagent-model')
+  assert.equal(pkg.name, 'dsh-subagents-model')
   assert.equal(pkg.type, 'module')
   assert.equal(pkg.exports['.'], './src/index.js')
   // `@deepseek-ai/dsh-client-modules` resolves the browser half through
@@ -449,7 +449,7 @@ check('the shared logic lives in the chunk, which is loaded through require.asyn
   // bare PACKAGE name — the runtime appends `/<chunk>` itself
   // (dsh-client-modules/lib/client.js:476-478).
   assert.match(chunk, /window\.__ModuleLoader__\.load\(/)
-  assert.match(chunk, /id:\s*'dsh-subagent-model'/)
+  assert.match(chunk, /id:\s*'dsh-subagents-model'/)
   assert.match(chunk, /chunk:\s*'client\.model\.js'/)
   assert.match(chunk, /return module\.exports/)
   assert.ok(!/^\s*import\s/m.test(chunk), 'client.model.js must not use import')
@@ -632,21 +632,21 @@ check('client.model.js registers under the bare package name', async () => {
   // shipped sibling chunks use
   // (@deepseek-ai/dsh-client-ui-sidebar-terminal/lib/client.terminal.js:2).
   //
-  // This file used to say `id: 'dsh-subagent-model/client.model.js'`, which
-  // registered the chunk under `dsh-subagent-model/client.model.js/client.model.js`
+  // This file used to say `id: 'dsh-subagents-model/client.model.js'`, which
+  // registered the chunk under `dsh-subagents-model/client.model.js/client.model.js`
   // — a key no `require.async('./client.model.js')` ever looks up. That request
   // rejected, `apply` swallowed the rejection, `modelChunk` stayed null, and
   // `withModel` returned null for EVERY seat: no header chip, no bottom-bar chip,
   // no hover row, and nothing on screen to explain it.
   const id = chunk.match(/^\s*id:\s*'([^']+)'/m)
   assert.ok(id, 'client.model.js must declare an id')
-  assert.equal(id[1], 'dsh-subagent-model',
+  assert.equal(id[1], 'dsh-subagents-model',
     `the chunk id must be the bare package name, got ${JSON.stringify(id[1])}`)
   assert.match(chunk, /^\s*chunk:\s*'client\.model\.js',?$/m)
   // The main bundle must declare the same package id, or the owner differs and
   // the derived key can never match.
   const mainId = main.match(/^\s*id:\s*'([^']+)'/m)
-  assert.equal(mainId?.[1], 'dsh-subagent-model', 'client.js must declare the same package id')
+  assert.equal(mainId?.[1], 'dsh-subagents-model', 'client.js must declare the same package id')
   // And the request must be relative, which is the only form that routes to a
   // package-local chunk (`require.async` ignores anything not starting with './').
   assert.match(main, /require\.async\('\.\/client\.model\.js'\)/)

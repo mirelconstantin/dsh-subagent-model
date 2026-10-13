@@ -1,5 +1,5 @@
 /**
- * dsh-subagent-model — per-turn route history, the browser half.
+ * dsh-subagents-model — per-turn route history, the browser half.
  *
  * Self-registering companion chunk to `client.js`, in the same
  * `window.__ModuleLoader__.load({ id, chunk, factory })` shape the shipped
@@ -58,18 +58,18 @@
  * means the ADAPTER supplies the default, so absence is "defaulted", reported as
  * such and never as "no effort".
  *
- * @module dsh-subagent-model/client.route-history
+ * @module dsh-subagents-model/client.route-history
  */
 
 window.__ModuleLoader__.load({
-  id: 'dsh-subagent-model',
+  id: 'dsh-subagents-model',
   chunk: 'client.route-history.js',
   factory: (require) => {
     const React = require('react')
     const h = React.createElement
 
     /** Locale namespace owned by this plugin, shared with `client.js`. */
-    const NS = 'dsh-subagent-model'
+    const NS = 'dsh-subagents-model'
 
     /**
      * The turn-level Definition kind.
@@ -79,7 +79,7 @@ window.__ModuleLoader__.load({
      * string is the key `turnDataSource(turn, kind)` is addressed by.
      * @type {string}
      */
-    const ROUTE_KIND = 'dsh-subagent-model-turn-route'
+    const ROUTE_KIND = 'dsh-subagents-model-turn-route'
 
     /** The seat that renders the history line under each turn. @type {string} */
     const TURN_TAIL_SLOT = 'conversation.chat.turnTail'
@@ -346,7 +346,7 @@ window.__ModuleLoader__.load({
      * ------------------------------------------------------------------ */
 
     /** Injected style tag id, kept distinct from `client.js`'s own. @type {string} */
-    const STYLE_TAG_ID = 'dsh-subagent-model/route-history.css'
+    const STYLE_TAG_ID = 'dsh-subagents-model/route-history.css'
 
     /**
      * Stylesheet for the history line, reusing the hover-card row metrics from
@@ -377,7 +377,7 @@ window.__ModuleLoader__.load({
       const tag = document.createElement('style')
       tag.setAttribute('data-plugin-css', STYLE_TAG_ID)
       try {
-        tag.dataset.plugin = 'dsh-subagent-model'
+        tag.dataset.plugin = 'dsh-subagents-model'
         tag.dataset.pluginCss = STYLE_TAG_ID
       } catch (e) {
         // `dataset` is best effort; the attribute above is the real key.
@@ -524,7 +524,7 @@ window.__ModuleLoader__.load({
         // apply under HMR would do. Keep the existing registration instead.
         try {
           if (typeof ctx.effect === 'function') {
-            ctx.effect(() => asDisposer(uiConversation.events.register(turnRouteDefinition())), 'dsh-subagent-model: turn-route definition')
+            ctx.effect(() => asDisposer(uiConversation.events.register(turnRouteDefinition())), 'dsh-subagents-model: turn-route definition')
             return
           }
         } catch (e) {
@@ -603,7 +603,7 @@ window.__ModuleLoader__.load({
               (tailProps) => TurnRouteLine(tailProps, t),
             )
             try {
-              if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'dsh-subagent-model: turn route tail')
+              if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'dsh-subagents-model: turn route tail')
             } catch (e) {
               // The facade already binds the disposer to the calling fiber.
             }

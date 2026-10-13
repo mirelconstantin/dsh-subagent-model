@@ -28,7 +28,7 @@ change beyond the bump itself.
 ### The exact sequence
 
 ```powershell
-cd C:\Users\mirel\.dsh\plugins\dsh-subagent-model
+cd C:\Users\mirel\.dsh\plugins\dsh-subagents-model
 
 # 1. bump FIRST, so the tests run against the version being released
 npm version patch        # or: npm version minor / npm version major
@@ -38,7 +38,7 @@ npm test
 
 # 3. commit the bump together with the change it describes
 git add -A
-git commit -m "release: dsh-subagent-model@1.1.2 — <what changed, one line>"
+git commit -m "release: dsh-subagents-model@1.1.2 — <what changed, one line>"
 
 # 4. tag; the tag and the manifest version must match, and CI enforces it
 git tag v1.1.2

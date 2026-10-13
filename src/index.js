@@ -4,7 +4,7 @@
  * This module runs in the **Host** (Node) process. It deliberately does
  * nothing on its own: the work is done by this package's browser half,
  * `src/client.js`, which the Host serves at
- * `/plugins/dsh-subagent-model/client.js` and the browser then executes.
+ * `/plugins/dsh-subagents-model/client.js` and the browser then executes.
  *
  * It exists because `@deepseek-ai/dsh-client-modules` discovers client
  * packages by scanning the **Host Loader's live entries** — a package with no
@@ -39,11 +39,11 @@
  * published, no event is subscribed, no session data is read or written. The
  * model, its tools, and its session logs are untouched by this file.
  *
- * @module dsh-subagent-model
+ * @module dsh-subagents-model
  */
 
 /** Loader identity. Matches the package name so diagnostics name the package. */
-export const name = 'dsh-subagent-model'
+export const name = 'dsh-subagents-model'
 
 /**
  * Mount the anchor.

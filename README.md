@@ -2,10 +2,10 @@
   <img src="https://raw.githubusercontent.com/pazalo/.github/main/assets/pazalo-logo.png" width="112" alt="Pazalo">
 </p>
 
-<h1 align="center">dsh-subagent-model</h1>
+<h1 align="center">dsh-subagents-model</h1>
 
 <p align="center">
-  <img src="https://img.shields.io/npm/v/dsh-subagent-model-FFC24D?style=flat-square&logo=npm&logoColor=black" alt="npm version">
+  <img src="https://img.shields.io/npm/v/dsh-subagents-model-FFC24D?style=flat-square&logo=npm&logoColor=black" alt="npm version">
   <img src="https://img.shields.io/badge/Node-%3E%3D20-FFC24D?style=flat-square&logo=node&logoColor=black" alt="Node">
   <img src="https://img.shields.io/badge/tests-passing-FFC24D?style=flat-square" alt="Tests">
   <img src="https://img.shields.io/badge/Licence-Apache--2.0-F0522C?style=flat-square" alt="Licence">
@@ -25,13 +25,13 @@
 From the GUI, paste this into **Add plugin**:
 
 ```
-dsh-subagent-model
+dsh-subagents-model
 ```
 
 Or from a terminal:
 
 ```bash
-dsh plugin add dsh-subagent-model
+dsh plugin add dsh-subagents-model
 ```
 
 **No build step is involved** and there are no dependencies at all. Every entry
@@ -61,16 +61,16 @@ running runtime is skipped at boot with a warning naming the mismatch.
 
 | Route | Command |
 | --- | --- |
-| npm, the default | `dsh plugin add dsh-subagent-model` |
-| Pinned to a version | `dsh plugin add dsh-subagent-model@1.1.1` |
-| Pinned to a commit | `dsh plugin add github:mirelconstantin/dsh-subagent-model#<sha>` |
-| Tarball | `dsh plugin add ./dsh-subagent-model-1.1.1.tgz` |
-| Local checkout | `dsh plugin add /absolute/path/to/dsh-subagent-model` |
+| npm, the default | `dsh plugin add dsh-subagents-model` |
+| Pinned to a version | `dsh plugin add dsh-subagents-model@1.2.0` |
+| Pinned to a commit | `dsh plugin add github:mirelconstantin/dsh-subagents-model#<sha>` |
+| Tarball | `dsh plugin add ./dsh-subagents-model-1.2.0.tgz` |
+| Local checkout | `dsh plugin add /absolute/path/to/dsh-subagents-model` |
 
 A `file:` or local-path install hard-links the package directory, so an editor
 that replaces a file breaks the link and the profile silently keeps the previous
 content. After editing a local install, delete
-`profiles/<profile>/node_modules/dsh-subagent-model` and re-install.
+`profiles/<profile>/node_modules/dsh-subagents-model` and re-install.
 
 </details>
 
@@ -277,7 +277,7 @@ Four states are kept apart, because collapsing them would print a lie:
 | `src/client.js` | the browser half; registers all seats |
 | `src/client.model.js` | the same pure logic as a browser chunk the half loads |
 | `src/client.route-history.js` | the `request/header` fold and the per-turn route map — **not currently loaded**, see above |
-| `locale/{en,ro}.json` | dictionaries for namespace `dsh-subagent-model` |
+| `locale/{en,ro}.json` | dictionaries for namespace `dsh-subagents-model` |
 | `scripts/unit.mjs` | `node --test` suite for `src/model.js` and locale parity |
 | `scripts/check-plugin.mjs` | manifest, patch, exports, browser-half contract |
 

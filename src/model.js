@@ -1,11 +1,11 @@
 /**
- * dsh-subagent-model — the ESM face of the shared model-reading logic.
+ * dsh-subagents-model — the ESM face of the shared model-reading logic.
  *
  * Run: `node --test scripts/unit.mjs` (which imports this file directly).
  *
  * THIS MODULE HOLDS NO LOGIC. It re-exports `src/client.model.js`, which is the
  * one copy of every function below. That file is a package-local CLIENT CHUNK: a
- * classic script served at `/plugins/dsh-subagent-model/client.model.js` and
+ * classic script served at `/plugins/dsh-subagents-model/client.model.js` and
  * self-registering through `window.__ModuleLoader__.load({ id, chunk, factory })`
  * — the shape three shipped packages already use
  * (`@deepseek-ai/dsh-client-ui-sidebar-terminal/lib/client.terminal.js:1-6`).
@@ -75,7 +75,7 @@
  * `resolveRoute` up the lineage for continuable children exactly as it already
  * did for one-shot ones.
  *
- * @module dsh-subagent-model/model
+ * @module dsh-subagents-model/model
  */
 
 import { readFileSync } from 'node:fs'

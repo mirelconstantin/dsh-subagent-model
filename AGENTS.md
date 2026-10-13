@@ -1,4 +1,4 @@
-# AGENTS.md — working on dsh-subagent-model
+# AGENTS.md — working on dsh-subagents-model
 
 ## Read this first
 
@@ -38,7 +38,7 @@ Each of these cost a release, and each is invisible on screen.
 **1. The chunk's `id` must be the bare package name.**
 The runtime builds the module key itself as `` `${id}/${chunk}` ``
 (`dsh-client-modules/lib/client.js:476-478`). Writing
-`id: 'dsh-subagent-model/client.model.js'` registers the chunk under a key that
+`id: 'dsh-subagents-model/client.model.js'` registers the chunk under a key that
 `require.async` never requests, the rejection is swallowed, and **every seat
 renders nothing**. See `RELEASING.md` §3.
 

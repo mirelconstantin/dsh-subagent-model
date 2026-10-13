@@ -1,7 +1,7 @@
 /**
- * dsh-subagent-model — the browser half.
+ * dsh-subagents-model — the browser half.
  *
- * Served verbatim by the Host at `/plugins/dsh-subagent-model/client.js` and
+ * Served verbatim by the Host at `/plugins/dsh-subagents-model/client.js` and
  * executed as a CLASSIC script. There is no bundler and no transpile step in
  * front of it, so this body must be valid plain script: no `import`, no
  * `export`, no JSX. The only way in is the registration below.
@@ -78,11 +78,11 @@
  * session state, or touches a tool result. It renders what the client store
  * already holds.
  *
- * @module dsh-subagent-model/client
+ * @module dsh-subagents-model/client
  */
 
 window.__ModuleLoader__.load({
-  id: 'dsh-subagent-model',
+  id: 'dsh-subagents-model',
   factory: (require) => {
     // Both specifiers are platform SEED words handed to every client bundle by
     // the web frontend's boot entry (`staticModules`, consumed at
@@ -142,7 +142,7 @@ window.__ModuleLoader__.load({
     }
 
     /** Locale namespace owned by this plugin. */
-    const NS = 'dsh-subagent-model'
+    const NS = 'dsh-subagents-model'
 
     /**
      * The one in-flight or settled catalog load this page shares.
@@ -216,7 +216,7 @@ window.__ModuleLoader__.load({
     const HOVER_ORDER = 20
 
     /** Injected style tag id, kept stable so re-apply is idempotent. */
-    const STYLE_TAG_ID = 'dsh-subagent-model/model.css'
+    const STYLE_TAG_ID = 'dsh-subagents-model/model.css'
 
     /* ------------------------------------------------------------------ *
      * Dictionaries, flattened.
@@ -420,7 +420,7 @@ window.__ModuleLoader__.load({
       const tag = document.createElement('style')
       tag.setAttribute('data-plugin-css', STYLE_TAG_ID)
       try {
-        tag.dataset.plugin = 'dsh-subagent-model'
+        tag.dataset.plugin = 'dsh-subagents-model'
         tag.dataset.pluginCss = STYLE_TAG_ID
       } catch (e) {
         // `dataset` is best effort; the attribute above is the real key.
@@ -1260,7 +1260,7 @@ window.__ModuleLoader__.load({
       //
       // `require.async` is built into the `require` this factory was handed
       // (`dsh-client-modules/lib/client.js:707-713`); the `./` specifier is what
-      // routes it to `importChunk`, which fetches `/plugins/dsh-subagent-model/
+      // routes it to `importChunk`, which fetches `/plugins/dsh-subagents-model/
       // client.model.js` and requires that file to self-register
       // (`:717-740`) — which is why the chunk declares `chunk: 'client.model.js'`.
       //
@@ -1319,7 +1319,7 @@ window.__ModuleLoader__.load({
           }
         }
         try {
-          if (typeof ctx.effect === 'function') ctx.effect(registerDictionaries, 'dsh-subagent-model: dictionaries')
+          if (typeof ctx.effect === 'function') ctx.effect(registerDictionaries, 'dsh-subagents-model: dictionaries')
           else registerDictionaries()
         } catch (e) {
           try {
@@ -1344,7 +1344,7 @@ window.__ModuleLoader__.load({
                 return undefined
               }
             }
-            if (typeof ctx.effect === 'function') ctx.effect(addLanguage, 'dsh-subagent-model: language')
+            if (typeof ctx.effect === 'function') ctx.effect(addLanguage, 'dsh-subagents-model: language')
             else addLanguage()
           }
         } catch (e) {
@@ -1400,7 +1400,7 @@ window.__ModuleLoader__.load({
               (chipProps) => h(withModel(ModelChip), { ...chipProps, loadCatalog }),
             )
             try {
-              if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'dsh-subagent-model: header slot')
+              if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'dsh-subagents-model: header slot')
             } catch (e) {
               // The facade already binds the disposer to the calling fiber.
             }
@@ -1424,7 +1424,7 @@ window.__ModuleLoader__.load({
               withModel(ModelHoverRow),
             )
             try {
-              if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'dsh-subagent-model: hover slot')
+              if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'dsh-subagents-model: hover slot')
             } catch (e) {
               // The facade already binds the disposer to the calling fiber.
             }
@@ -1453,7 +1453,7 @@ window.__ModuleLoader__.load({
               withModel(ModelDockChip),
             )
             try {
-              if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'dsh-subagent-model: dock slot')
+              if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'dsh-subagents-model: dock slot')
             } catch (e) {
               // The facade already binds the disposer to the calling fiber.
             }

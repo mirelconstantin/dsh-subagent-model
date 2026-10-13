@@ -1,5 +1,5 @@
 /**
- * dsh-subagent-model — unit suite for the shared model-reading logic.
+ * dsh-subagents-model — unit suite for the shared model-reading logic.
  *
  * Run: `node --test scripts/unit.mjs`
  *
