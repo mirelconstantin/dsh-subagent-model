@@ -1,0 +1,53 @@
+name: tests
+
+# The suite is the only thing standing between a silent blank UI and a release.
+# Every failure mode this plugin has had was invisible on screen: a wrong chunk
+# id, a mis-ordered createPortal, a lazily-populated store read the wrong way.
+# Each rendered nothing, logged nothing, and passed every static check. So the
+# gates that matter here are the ones that EXECUTE the browser half.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22 is the floor declared in package.json `engines`.
+          node-version: 22
+
+      # No install step: the package ships committed source and declares no
+      # dependencies, and its suite needs none. `npm ci` would only add a
+      # lockfile that has nothing to install.
+      - name: unit + composition + install probe
+        run: npm test
+
+      # The pack is the artefact a user actually gets, so it is checked as one:
+      # the tarball must carry the browser half, its logic chunk, the patch and
+      # both dictionaries, or a clean install renders nothing with no error.
+      - name: the published tarball carries every entry point
+        run: |
+          npm pack --dry-run
+          node -e "
+            const {execSync}=require('node:child_process');
+            const out=execSync('npm pack --json --dry-run',{encoding:'utf8'});
+            const [meta]=JSON.parse(out.slice(out.indexOf('[')));
+            console.log('packed', meta.filename, meta.entryCount, 'files');
+            if (meta.entryCount < 12) throw new Error('the tarball is missing entry points');
+          "
+
+      - name: the working tree is what is committed
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo '::error::uncommitted changes'
+            git status --porcelain
+            git diff
+            exit 1
+          fi

@@ -1,6 +1,6 @@
 {
   "name": "dsh-subagent-model",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "description": "Model visibility for DeepSeek Harness: a header chip naming the model and reasoning effort each Session runs on, a bottom-bar chip showing which models a whole run delegated to, and sidebar hover cards showing what each conversation actually did. It only adds controls — the shipped subagent dropdown is untouched.",
   "icon": "./icon.svg",
   "type": "module",
@@ -23,6 +23,8 @@
     "icon.svg",
     "cordis.patch.yml",
     "README.md",
+    "AGENTS.md",
+    "RELEASING.md",
     "LICENSE"
   ],
   "keywords": [
@@ -42,6 +44,9 @@
     "observability"
   ],
   "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mirelconstantin/dsh-subagent-model.git"
@@ -65,8 +70,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test scripts/unit.mjs && node scripts/check-plugin.mjs",
+    "prepublishOnly": "npm test",
+    "test": "node --test scripts/unit.mjs && node scripts/check-plugin.mjs && node scripts/install-probe.mjs",
     "test:unit": "node --test scripts/unit.mjs",
-    "test:composition": "node scripts/check-plugin.mjs"
+    "test:composition": "node scripts/check-plugin.mjs",
+    "test:install": "node scripts/install-probe.mjs"
   }
 }

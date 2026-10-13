@@ -6,9 +6,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/npm/v/dsh-subagent-model-FFC24D?style=flat-square&logo=npm&logoColor=black" alt="npm version">
-  <img src="https://img.shields.io/npm/dw/dsh-subagent-model-F0522C?style=flat-square&logo=npm&logoColor=white" alt="npm downloads">
   <img src="https://img.shields.io/badge/Node-%3E%3D20-FFC24D?style=flat-square&logo=node&logoColor=black" alt="Node">
-  <img src="https://img.shields.io/badge/Tests-84-FFC24D?style=flat-square" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-passing-FFC24D?style=flat-square" alt="Tests">
   <img src="https://img.shields.io/badge/Licence-Apache--2.0-F0522C?style=flat-square" alt="Licence">
 </p>
 
@@ -38,14 +37,24 @@ dsh plugin add dsh-subagent-model
 **No build step is involved** and there are no dependencies at all. Every entry
 point ships as committed source: the Host reads `src/client.js` and serves it to
 the page verbatim, so pnpm never has to run anything and you are never asked to
-allowlist a build. Restart the profile afterwards and the chip appears.
+allowlist a build.
 
-The only dependency-shaped field is a **peer range on the runtime itself** —
-`@deepseek-ai/dsh-app-boot: >=0.2.0-rc.2 <0.3.0` — and that is the field DSH
-actually evaluates: a plugin whose dsh peer range does not satisfy the running
-runtime is **skipped at boot**, with a warning naming the mismatch. Accept it on
-an unexpected runtime with `dsh plugin allow-version`, or wait for a release
-that fits the range.
+**Nothing else is required.** The installer does the composition work itself —
+it reads this package's `cordis.patch.yml`, mounts the Loader row, and adds the
+package to `dsh.profile.bundles`
+(`dsh-plugin-manager/lib/index.js:247-265`). Do **not** hand-add a row to your
+profile's `cordis.patch.yml` or the package to `package.json`: a second
+definition of the same package fails composition and takes the whole web shell
+with it (`dsh-client-modules/lib/index.js:871-877`).
+
+Restart the profile afterwards. The header chip appears in any conversation that
+has made a request; the bottom-bar chip appears only once a run has delegated to
+at least one subagent, because a run with no subagents has nothing to say.
+
+The peer range on `@deepseek-ai/dsh-app-boot` (`>=0.2.0-rc.2 <0.3.0`) is the only
+compatibility field the runtime evaluates
+(`dsh-app-boot/lib/index.js:289-301`): a plugin whose range does not satisfy the
+running runtime is skipped at boot with a warning naming the mismatch.
 
 <details>
 <summary>Installing by other routes</summary>
@@ -53,12 +62,35 @@ that fits the range.
 | Route | Command |
 | --- | --- |
 | npm, the default | `dsh plugin add dsh-subagent-model` |
-| Pinned to a version | `dsh plugin add dsh-subagent-model@1.0.0` |
+| Pinned to a version | `dsh plugin add dsh-subagent-model@1.1.1` |
 | Pinned to a commit | `dsh plugin add github:mirelconstantin/dsh-subagent-model#<sha>` |
-| Tarball | `dsh plugin add ./dsh-subagent-model-1.0.0.tgz` |
+| Tarball | `dsh plugin add ./dsh-subagent-model-1.1.1.tgz` |
 | Local checkout | `dsh plugin add /absolute/path/to/dsh-subagent-model` |
 
+A `file:` or local-path install hard-links the package directory, so an editor
+that replaces a file breaks the link and the profile silently keeps the previous
+content. After editing a local install, delete
+`profiles/<profile>/node_modules/dsh-subagent-model` and re-install.
+
 </details>
+
+## If nothing appears
+
+Every failure mode this plugin has had was silent — no error, no log, just an
+absent chip — so here is the order to check:
+
+1. **Restart the profile.** The bundle is composed at boot, not on save.
+2. **Confirm it is enabled** in Settings → Plugins.
+3. **Run the suite in the installed copy.** It needs no harness and no network:
+   `npm test` from the package directory prints 89 unit tests, 35 composition
+   checks, and an install probe that packs the tarball, unpacks it into a
+   throwaway profile and executes the shipped bytes. A failure names the layer.
+4. **The header chip is the diagnostic.** It renders in any conversation with a
+   resolved route and needs no subagents. If the header chip is missing but the
+   dock chip is present, the dock's session-scope slot is the problem; if both
+   are missing, the browser half did not load at all.
+
+Contributors: [AGENTS.md](./AGENTS.md) and [RELEASING.md](./RELEASING.md).
 
 ## What it shows
 

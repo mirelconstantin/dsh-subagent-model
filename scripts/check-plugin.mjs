@@ -16,6 +16,7 @@
  */
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -177,6 +178,43 @@ check('package.json carries no runtime dependency', async () => {
   // This plugin reads projection values the client store already holds, so it
   // needs nothing installed to run. `peerDependencies` is the exception — see
   // the compatibility-gate check below.
+})
+
+check('a release is versioned, and the release rules travel with it', async () => {
+  const pkg = JSON.parse(await read('package.json'))
+  // The version must be a plain semver triple with no prerelease tag: this plugin
+  // is installed by name, so a `-rc` would be a different install target.
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/, `version must be MAJOR.MINOR.PATCH, got ${pkg.version}`)
+  const [major, minor, patch] = pkg.version.split('.').map(Number)
+  assert.ok(major >= 1, 'a published plugin starts at 1.0.0')
+  assert.ok(minor >= 0 && patch >= 0)
+
+  // The rule has to be readable by whoever does the next release, and it has to
+  // be in the tarball, not only in the repo — an unpacked install is where the
+  // next contributor will actually be.
+  for (const doc of ['RELEASING.md', 'AGENTS.md']) {
+    assert.ok(existsSync(path.join(root, doc)), `${doc} must exist`)
+    const text = await read(doc)
+    assert.ok(/npm version (patch|minor|major)/.test(text),
+      `${doc} must state the bump command`)
+    assert.ok(/RELEASING\.md/.test(text) || doc === 'RELEASING.md',
+      `${doc} must point at the other`)
+  }
+  // AGENTS.md is the file an AI or a new contributor reads first, so the release
+  // rule cannot be buried in RELEASING.md alone.
+  const agents = await read('AGENTS.md')
+  assert.match(agents, /Every release bumps|version/i,
+    'AGENTS.md must state the version-bump rule')
+
+  // And both must be in `files`, or npm silently drops them from the tarball.
+  assert.ok(pkg.files.includes('RELEASING.md'), 'RELEASING.md must be in files')
+  assert.ok(pkg.files.includes('AGENTS.md'), 'AGENTS.md must be in files')
+
+  // The install command in the README must name the version that ships, or a
+  // pinned install silently resolves to something older than this tarball.
+  const readme = await read('README.md')
+  assert.ok(readme.includes(pkg.version),
+    `README.md must mention the released version ${pkg.version}`)
 })
 
 check('package.json pins the dsh runtime it was verified against', async () => {
