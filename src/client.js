@@ -949,31 +949,41 @@ window.__ModuleLoader__.load({
         h('span', { className: 'dsh-smd-count' }, t('dock.subagentsShort')),
       )
 
+      // `createPortal(children, container)` — the CHILDREN first, then the
+      // container. This used to call `h(container, ref, props, …)`, which throws
+      // the moment the panel opens; the renderer contains the error per slot
+      // entry (dsh-client-ui-renderer/lib/client.js:605-625), so the failure was
+      // invisible and the chip simply vanished on click. Same shape as the
+      // shipped ContextMeter panel and the sibling proxy chip
+      // (plugins/dsh-opencode-router/src/client/ProxyStatusChip.tsx:254).
       const panel = open && createPortal !== null
-        ? h(
-            portalTarget(),
-            panelRef,
-            {
-              className: 'dsh-smd-panel',
-              role: 'dialog',
-              'aria-label': t('dock.panelTitle'),
-              style: position ?? { visibility: 'hidden', left: 0, top: 0 },
-            },
-            h('div', { className: 'dsh-smd-panelHead' }, t('dock.panelTitle')),
-            h('div', { className: 'dsh-smd-rows' },
-              summary.groups.map((group) => h(
-                'div',
-                { key: `${group.model}|${group.effort}`, className: 'dsh-smd-row' },
-                h('span', { className: 'dsh-smd-rowModel' }, group.model + (group.effort !== '' ? ` (${group.effort})` : '')),
-                h('span', { className: 'dsh-smd-rowCount' }, m.formatCount(group.count)),
-              )),
+        ? createPortal(
+            h(
+              'div',
+              {
+                ref: panelRef,
+                className: 'dsh-smd-panel',
+                role: 'dialog',
+                'aria-label': t('dock.panelTitle'),
+                style: position ?? { visibility: 'hidden', left: 0, top: 0 },
+              },
+              h('div', { className: 'dsh-smd-panelHead' }, t('dock.panelTitle')),
+              h('div', { className: 'dsh-smd-rows' },
+                summary.groups.map((group) => h(
+                  'div',
+                  { key: `${group.model}|${group.effort}`, className: 'dsh-smd-row' },
+                  h('span', { className: 'dsh-smd-rowModel' }, group.model + (group.effort !== '' ? ` (${group.effort})` : '')),
+                  h('span', { className: 'dsh-smd-rowCount' }, m.formatCount(group.count)),
+                )),
+              ),
+              summary.inherited > 0
+                ? h('div', { className: 'dsh-smd-note' }, t('tip.inherited', { count: m.formatCount(summary.inherited) }))
+                : null,
+              summary.running > 0
+                ? h('div', { className: 'dsh-smd-note' }, t('tip.running', { count: m.formatCount(summary.running) }))
+                : null,
             ),
-            summary.inherited > 0
-              ? h('div', { className: 'dsh-smd-note' }, t('tip.inherited', { count: m.formatCount(summary.inherited) }))
-              : null,
-            summary.running > 0
-              ? h('div', { className: 'dsh-smd-note' }, t('tip.running', { count: m.formatCount(summary.running) }))
-              : null,
+            portalTarget(),
           )
         : null
 

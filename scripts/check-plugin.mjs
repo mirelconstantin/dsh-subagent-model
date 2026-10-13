@@ -656,13 +656,31 @@ check('the bottom-bar chip occupies the composer dock beside the built-in contro
   assert.match(code, /\(useDismissOnOutsidePointer \?\? noopDismiss\)/)
 })
 
-check('the dock panel portals through react-dom', async () => {
+check('the dock panel portals through react-dom, children first', async () => {
   const { code } = await views('src/client.js')
   // The panel must port to document.body: rendered inline it would be clipped by
   // the conversation shell's overflow. The bare word appears only in comments;
   // the `require` call is what proves it is actually reached for.
   assert.match(code, /require\('react-dom'\)/)
   assert.match(code, /createPortal = reactDom\.createPortal/)
+
+  // `createPortal(children, container)` — CHILDREN FIRST. This used to call
+  // `h(container, ref, props, …)` instead, which throws inside React's
+  // createChild the moment the panel opens. The renderer contains a throwing
+  // entry and abdicates the slot (dsh-client-ui-renderer/lib/client.js:605-625),
+  // so the failure was silent: the chip vanished on click rather than opening.
+  // Same shape as the shipped ContextMeter panel and the sibling proxy chip
+  // (plugins/dsh-opencode-router/src/client/ProxyStatusChip.tsx:254).
+  const start = code.indexOf('const panel = open')
+  // The container sits ~27 lines below the call, past a 700-char window, so the
+  // slice has to reach the closing paren rather than just the opening call.
+  const call = code.slice(start, code.indexOf('return h(\'span\', { ref: rootRef', start))
+  assert.match(call, /\? createPortal\(/, 'the panel must be built by createPortal, not by h(container, …)')
+  // The container is the final argument: `…),<container>)` — here it is
+  // `portalTarget(),` followed by the closing paren on its own line.
+  assert.match(call, /portalTarget\(\),?\s*\n\s*\)/, 'the container must be the LAST createPortal argument')
+  assert.ok(!/\? h\(\s*\n\s*portalTarget\(\)/.test(call),
+    'createPortal takes children first; h(container, …) is not a portal')
 })
 
 check('src/client.js registers the Romanian language', async () => {
