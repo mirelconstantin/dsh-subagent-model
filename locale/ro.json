@@ -1,33 +1,12 @@
 {
   "chip": {
     "prefix": "model",
-    "aria": "Modelul sesiunii: {model}",
     "title": "Această sesiune folosește {model}",
     "titleWithEffort": "Această sesiune folosește {model} cu efort {effort}",
     "titleInherited": "Această sesiune a moștenit {model} de la părinte",
     "unknown": "fără model încă",
     "pending": "se schimbă",
-    "inherited": "moștenit",
-    "total": "{count} în total, inclusiv cei imbricați",
-    "differs": "Model propriu {model} — diferit de al părintelui ({parent})",
-    "treeInherited": "Moștenește {model} de la părinte",
-    "own": "Model propriu {model}",
-    "countTotal": "{count} subagenți",
-    "countRunning": "{count} în execuție",
-    "treeAria": "Sesiuni subagent",
-    "loading": "Se încarcă subagenții…",
-    "loadError": "Nu se pot încărca subagenții",
-    "retry": "Reîncearcă",
-    "openAside": "În lateral",
-    "openAsideAria": "Deschide {label} în lateral",
-    "modeOneShot": "one-shot",
-    "modeContinuable": "continuabil",
-    "modeUnknown": "tip necunoscut",
-    "actRunning": "în execuție",
-    "actCompleted": "finalizat",
-    "actInactive": "inactiv",
-    "branchExpand": "Extinde {label}",
-    "branchCollapse": "Restrânge {label}"
+    "inherited": "moștenit"
   },
   "tip": {
     "summary": "{count} subagenți:",
@@ -41,7 +20,6 @@
   },
   "row": {
     "label": "Model",
-    "unknown": "Niciun model încă",
     "inherited": "Moștenit de la părinte",
     "inheritedFrom": "moștenit",
     "title": "Modelul pe care această sesiune l-a folosit ultima dată sau urmează să-l folosească",
@@ -60,13 +38,6 @@
     "mode": "Tip",
     "modeOneShot": "one-shot, doar citire",
     "modeContinuable": "continuabil"
-  },
-  "route": {
-    "label": "A rulat pe",
-    "title": "Această tură a rulat pe {model}",
-    "switchedTitle": "Această tură a rulat pe {model}, schimbată de la {from}",
-    "effortDefaulted": "(implicit din adaptor)",
-    "switchedFrom": "(era {from})"
   },
   "dock": {
     "subagents": "{count} subagenți în această rulare",

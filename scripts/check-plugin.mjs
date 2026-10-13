@@ -287,21 +287,15 @@ check('src/client.js declares no services', async () => {
  * The seats
  * ------------------------------------------------------------------ */
 
-check('the additive seats use fresh ids, and only the tree takes a shipped cell', async () => {
+check('every seat registers its own id through a declared constant', async () => {
   const { code } = await views('src/client.js')
-  // The header chip, the hover row and the dock chip ADD cells, so their ids
-  // must be this plugin's own. The tree is the deliberate exception: it
-  // REPLACES `subagent-catalog` (see the shadowing-priority check below), and it
-  // must name that id through the constant so the takeover is one edit to undo.
-  const literalIds = [...code.matchAll(/\bid:\s*'([^']+)'/g)].map((m) => m[1])
-  for (const id of literalIds) {
-    assert.notEqual(id, 'subagent-catalog', 'the shipped cell must be claimed through SHADOWED_CELL_ID')
-  }
+  // All three seats ADD cells, so each id must be this plugin's own and must be
+  // named by a constant, which is what makes a seat renameable in one edit.
   // Anchored on the registration object literals, which are indented deeper than
   // any function parameter list — a bare `\bid:` also matches `rootId,` in a
   // signature.
   const shorthand = [...code.matchAll(/^\s{16}id:\s*([A-Za-z_][A-Za-z0-9_]*),$/gm)].map((m) => m[1])
-  assert.ok(shorthand.length === 4, `all four seats must register exactly one id each (found ${shorthand.length})`)
+  assert.ok(shorthand.length === 3, `all three seats must register exactly one id each (found ${shorthand.length})`)
   for (const name of shorthand) {
     assert.match(code, new RegExp(`^\\s*const ${name} = '`, 'm'), `${name} must be a declared constant`)
   }
@@ -322,12 +316,12 @@ check('the hover seat is the sidebar session-row hover slot', async () => {
   assert.match((await read('src/client.js')), /HOVER_SLOT\s*=\s*'sidebar\.session\.row\.hover'/)
 })
 
-check('both registrations are deferred through slots.inject', async () => {
+check('every registration is deferred through slots.inject', async () => {
   const { code } = await views('src/client.js')
   // `register` throws when the slot is not yet declared
   // (`dsh-client-ui-slots/lib/index.js:163-165`), so every seat is wrapped.
   const injects = code.match(/slots\.inject\(/g) ?? []
-  assert.ok(injects.length >= 4, 'all four seats must be deferred through slots.inject')
+  assert.ok(injects.length >= 3, 'all three seats must be deferred through slots.inject')
 })
 
 check('the stylesheet injects idempotently', async () => {
@@ -544,65 +538,45 @@ check('the queued route switch is reported with the model it replaces', async ()
   assert.match(code, /t\('row\.switchFrom',/)
 })
 
-check('the tree owns the shipped catalog cell at a written shadowing priority', async () => {
+check('no seat claims a shipped cell', async () => {
+  const raw = await read('src/client.js')
   const { code } = await views('src/client.js')
-  // The shipped CatalogRows renders no per-row slot
-  // (dsh-client-ui-subagent/lib/client.js:164-338), so a marker beside a
-  // subagent REQUIRES owning the cell. A `list` slot keeps the first entry per
-  // `id` cell, so a very low priority is what performs the takeover.
-  //
-  // The priority is asserted to be DISTINCT, not to equal a literal: the two
-  // sibling plugins both claim `subagent-catalog`, and the slots registry
-  // rejects a duplicate `id` only AT THE SAME priority
-  // (dsh-client-ui-slots/lib/index.js:183-184) — so a fixed -9999 here would
-  // break the header the moment `dsh-subagent-tree` is co-installed. The old
-  // assertion of `-9999` matched only the sibling's value quoted in a comment.
-  assert.match(code, /^\s*const SHADOWED_CELL_ID = 'subagent-catalog'$/m)
-  const priority = code.match(/^\s*const SHADOW_PRIORITY = (-?\d+)$/m)
-  assert.ok(priority, 'src/client.js must declare a numeric SHADOW_PRIORITY')
-  assert.ok(Number(priority[1]) < 0, 'the shadowing priority must be very low so the list slot keeps this entry')
-  assert.ok(!/-9999\b/.test(code), 'SHADOW_PRIORITY must not collide with dsh-subagent-tree, which claims the same cell')
-  assert.match(code, /id: SHADOWED_CELL_ID/)
-  assert.match(code, /priority: SHADOW_PRIORITY/)
+  // The regression that matters most: an earlier version registered
+  // `id: 'subagent-catalog'` at `priority: -9998` to replace the shipped
+  // dropdown. Replacing that cell means reimplementing its whole navigation
+  // contract (dsh-client-ui-subagent/lib/client.js:949-974), and every mistake
+  // in that reimplementation removes the stock subagent list from the UI. The
+  // plugin now only ADDS cells, so the shipped dropdown is untouchable.
+  assert.ok(
+    !/id:\s*['"]subagent-catalog['"]/.test(raw),
+    'this plugin must never claim the shipped subagent-catalog cell',
+  )
+  assert.ok(!/SHADOW_PRIORITY|SHADOWED_CELL_ID/.test(code), 'the shadowing constants must not come back')
+  assert.ok(!/\bpriority:\s*-?\d/.test(code), 'no seat may register a shadowing priority')
+  // And the tree that the takeover existed for must stay deleted: its CSS and
+  // its helpers would otherwise be dead weight that lints as live code.
+  assert.ok(!/dsh-smt-/.test(code), 'the removed tree stylesheet must not come back')
+  for (const gone of ['SubagentModelTree', 'SubagentTreeRows', 'isKnownLeaf', 'visibleRowIds', 'rowDomId', 'routeMarker', 'catalogActions']) {
+    assert.ok(!code.includes(gone), `${gone} was removed with the tree and must not return`)
+  }
 })
 
-// The two defects that made the plugin render NOTHING at all when enabled. Both
-// are silent regressions — the header simply lost its pills — so each is pinned
-// here against the exact source line that reintroduces it.
-check('the tree builds its catalog from every session row, not only loaded stores', async () => {
+// The defect that made subagents vanish from the summary the chips read.
+check('the catalog is read from every session row, not only loaded stores', async () => {
   const { code } = await views('src/client.js')
-  // `projectionsBySession` is populated LAZILY, so a session that was never
-  // opened has no entry there and its catalog lives only on the list row's
-  // `projectionValues`. Iterating the projection map alone therefore dropped
-  // exactly the sessions the catalog is about, and the tree rendered nothing.
-  // The iteration must be driven by `byId`, with the shared fallback reader.
-  const memo = code.slice(code.indexOf('const catalogs = (0, React.useMemo)'))
-  assert.match(memo, /for \(const id of Object\.keys\(byId/, 'the catalog walk must iterate the session rows')
-  assert.ok(
-    !memo.slice(0, memo.indexOf('}, [projections')).includes('Object.entries(projections'),
-    'the catalog walk must not be driven by projectionsBySession alone',
-  )
-  assert.match(memo, /m\.catalogFor\(projections \?\? \{\}, byId, id\)/, 'the catalog walk must use the chunk\'s list-row fallback')
-  // The fallback itself must be pinned in the chunk, or the rule only holds for
-  // the tree: the chip, the hover row and the summary walk all go through it.
   const chunk = await read('src/client.model.js')
+  // `projectionsBySession` is populated LAZILY, so a session that was delegated
+  // to but never opened has no entry there and carries its catalog only on the
+  // list row's `projectionValues`. Reading the projection map alone therefore
+  // dropped exactly the sessions the summary is about, and the chips showed
+  // nothing. The shipped client reads the same fallback
+  // (dsh-client-ui-subagent/lib/client.js:71, :200, :816).
   assert.match(chunk, /function catalogFor\(projectionsBySession, byId, sessionId\)/)
   assert.match(chunk, /byId\?\.\[sessionId\]\?\.projectionValues\?\.subagentCatalog/, 'catalogFor must read the list-row attachment')
   assert.match(chunk, /catalogFor\(projectionsBySession, byId, id\)/, 'the summary walk must use catalogFor')
-})
-
-check('the tree keeps the navigation actions of the cell it replaces', async () => {
-  const { code } = await views('src/client.js')
-  // Taking over `subagent-catalog` takes over its component contract too. The
-  // shipped `SubagentCatalogAction` receives these three through its
-  // registration's `inject` (dsh-client-ui-subagent/lib/client.js:949-974);
-  // without them every row renders but clicking one throws.
-  const block = code.slice(code.indexOf('id: SHADOWED_CELL_ID'), code.indexOf('withModel(SubagentModelTree)'))
-  assert.match(block, /inject: \(\) => catalogActions/, 'the shadowed cell must inject its navigation actions')
-  assert.match(code, /const catalogActions = \{/, 'the navigation actions must be built once')
-  for (const action of ['openChild', 'openChildAside', 'refreshProjection']) {
-    assert.match(code, new RegExp(`${action}: \\(address\\)|${action}: \\(parentSessionId\\)`), `${action} must be supplied`)
-  }
+  // The walk must not regress to the projection-only read.
+  assert.ok(!/catalogOf\(projectionsBySession, id\)/.test(chunk), 'the summary walk must not read the projection map alone')
+  assert.ok(code.includes('m.catalogFor') || code.includes('m.resolveRoute'), 'the browser half resolves through the chunk')
 })
 
 check('the bottom-bar chip occupies the composer dock beside the built-in controls', async () => {
@@ -629,22 +603,11 @@ check('the bottom-bar chip occupies the composer dock beside the built-in contro
   assert.match(code, /\(useDismissOnOutsidePointer \?\? noopDismiss\)/)
 })
 
-check('the route marker stays silent when nothing distinguishes the child', async () => {
+check('the dock panel portals through react-dom', async () => {
   const { code } = await views('src/client.js')
-  // With selection off every child inherits, so marking each one would mark all
-  // of them and say nothing. A marker appears only for a subagent whose route
-  // is its OWN.
-  //
-  // `dsh-smt-modelDiffers` and `chip.differs` matched 5 raw hits between them
-  // and NONE was a call: 3 were the two en/ro FALLBACK dictionaries, 1 the CSS
-  // rule and 1 the className template. Deleting the actual call site kept both
-  // green. The `t(` CALL is the proof; the className keeps its own assertion.
-  assert.match(code, /^\s*function routeMarker\(/m)
-  assert.match(code, /t\('chip\.differs',/)
-  assert.match(code, /className: differs \? 'dsh-smt-model dsh-smt-modelDiffers'/)
-  // The tree must port through react-dom: rendered inline it would be clipped
-  // by the conversation shell's overflow. The bare word appears only in
-  // comments; the `require` call is what proves it is actually reached for.
+  // The panel must port to document.body: rendered inline it would be clipped by
+  // the conversation shell's overflow. The bare word appears only in comments;
+  // the `require` call is what proves it is actually reached for.
   assert.match(code, /require\('react-dom'\)/)
   assert.match(code, /createPortal = reactDom\.createPortal/)
 })

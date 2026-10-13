@@ -6,26 +6,40 @@
  * front of it, so this body must be valid plain script: no `import`, no
  * `export`, no JSX. The only way in is the registration below.
  *
- * WHAT IT SHOWS. The LLM model a Session runs on, in two seats:
+ * WHAT IT SHOWS. The LLM model a Session runs on, in three seats. Every one of
+ * them ADDS a cell; none of them replaces a shipped one:
  *
- *   1. A chip in the active Session's header, beside the subagent-catalog pill,
- *      reading "model: <id>". Registered on `conversation.session.header.actions`,
- *      a `kind: "list"` slot (`dsh-client-ui-conversation/lib/client.js:18268-18271`)
- *      whose four shipped occupants are the agent-preset label, the job list, the
- *      subagent catalog and the Agent Team action
- *      (`dsh-cordis-client-runner/lib/client.js:3544-3549`). A fresh `id` ADDS
- *      a cell, so every shipped pill keeps its place — this deliberately does
- *      NOT reuse the `subagent-catalog` id the sibling plugin `dsh-subagent-tree`
- *      shadows, because that cell is already taken and a second claim would
- *      collide at the same priority.
+ *   1. A chip in the active Session's header, reading "model: <id>". Registered
+ *      on `conversation.session.header.actions`, a `kind: "list"` slot
+ *      (`dsh-client-ui-conversation/lib/client.js:18268-18271`) whose shipped
+ *      occupants are the agent-preset label, the job list, the subagent catalog
+ *      and the Agent Team action (`dsh-cordis-client-runner/lib/client.js:3544-3549`).
  *
- *   2. A row in every Session's hover card in the sidebar, between its relative
+ *   2. A chip in the composer dock — the bottom bar. `conversation.composer.dock`
+ *      is declared at `dsh-client-ui-conversation/lib/client.js:18329-18332` and
+ *      rendered in the row BELOW the composer beside the built-in ContextMeter
+ *      (`:17613-17619`). It states how many subagents the run delegated to and
+ *      opens a panel of the models they ran on, which is the fact the header chip
+ *      cannot show once the header scrolls away. Same slot and same shape as the
+ *      sibling `dsh-opencode-router` proxy chip
+ *      (`plugins/dsh-opencode-router/src/client/index.ts:85-90`).
+ *
+ *   3. A row in every Session's hover card in the sidebar, between its relative
  *      time and its trailing status line. `sidebar.session.row.hover` is a
  *      `kind: "list"` slot declared by `dsh-client-ui-workspace/lib/client.js:4322-4325`
  *      and described at `dsh-cordis-client-runner/lib/client.js:5636-5639`; its
  *      shipped occupant is the schedule row
- *      (`dsh-client-ui-schedule/lib/client.js:6855-6861`). A fresh `id` adds a
- *      second row beside it, so scheduled tasks stay visible.
+ *      (`dsh-client-ui-schedule/lib/client.js:6855-6861`).
+ *
+ * WHAT THIS PLUGIN DELIBERATELY DOES NOT DO. It no longer claims the shipped
+ * `subagent-catalog` cell, so the harness's own subagent dropdown is left exactly
+ * as shipped. An earlier version took that cell over at a written priority in
+ * order to put a model marker beside each subagent row, and it made the subagent
+ * list disappear entirely: the shipped `CatalogRows` renders no per-row slot
+ * (`dsh-client-ui-subagent/lib/client.js:164-338`), so replacing the cell meant
+ * reimplementing the whole navigation contract — and any mistake there took the
+ * stock dropdown with it. The per-subagent breakdown now lives in the bottom-bar
+ * chip instead, which needs none of that. Do not reintroduce the shadowing.
  *
  * WHERE THE VALUE COMES FROM. The `modelSelection` Session projection, which
  * `dsh-api-session-controller` already registers and wires
@@ -44,12 +58,15 @@
  * model as its parent is the honest expected case, not a bug — and a subagent
  * with a DIFFERENT model is precisely the fact this chip exists to surface.
  *
- * HONESTY ABOUT MISSING DATA. A Session that has not been loaded is absent from
- * `projectionsBySession`, and a loaded Session that has not made a request has
- * a `modelSelection` snapshot whose `next` is `null`. Those are different
- * facts, so the hover row renders a dictionary line for "no model yet" in the
- * second case and nothing at all in the first — `src/client.model.js` keeps them
- * apart, and the header chip disappears rather than showing a stale model.
+ * HONESTY ABOUT MISSING DATA. `projectionsBySession` is populated lazily — a
+ * store is created only when a session is actually opened — so a session that was
+ * delegated to but never opened is absent from it and carries its values only on
+ * the list row's `projectionValues`. Every read here therefore goes through
+ * `catalogFor` / the `byId` fallback, which is what the shipped client reads
+ * (`dsh-client-ui-subagent/lib/client.js:71, :200, :816`); reading the projection
+ * map alone is what made subagents vanish from this plugin. A loaded Session that
+ * has not made a request has a `modelSelection` whose `next` is `null`, which is a
+ * different fact and gets its own "no model yet" line rather than a stale model.
  *
  * WHERE THE LOGIC LIVES. The pure reading functions are NOT inlined here. They
  * live in the sibling chunk `src/client.model.js`, fetched once by
@@ -154,37 +171,6 @@ window.__ModuleLoader__.load({
     const ACTIONS_SLOT = 'conversation.session.header.actions'
     const ACTIONS_SLOT_ID = 'subagent-model'
 
-    /**
-     * The cell this half takes over, and the priority that takes it.
-     *
-     * `subagent-catalog` is the shipped `SubagentCatalogAction`'s cell
-     * (`dsh-client-ui-subagent/lib/client.js:968-974`). Reusing the id puts
-     * this entry IN that cell rather than beside it, which is the only way to
-     * put a marker next to each subagent: the shipped `CatalogRows` renders no
-     * per-row slot (`:164-338`), so there is no extension point to add one to.
-     *
-     * The very low priority is both allowed and required. Entries sort ascending
-     * and a `list` slot keeps only the FIRST entry per `id` cell
-     * (`dsh-cordis-client-runner/lib/client.js:3496-3551`;
-     * `dsh-client-ui-slots/lib/index.js:221`, `:278-293`), so this outranks the
-     * shipped entry.
-     *
-     * The number must be DISTINCT from every other entry claiming this cell.
-     * A duplicate `id` is rejected only AT THE SAME priority
-     * (`dsh-client-ui-slots/lib/index.js:183-184`), which is why the written
-     * value is -9998 and not the -9999 the sibling `dsh-subagent-tree` uses
-     * (`src/tree.js`): co-installed, the two would claim `subagent-catalog` at
-     * the same priority and the second `register` would throw, blanking the
-     * header. It also keeps this entry from colliding with ITSELF when the
-     * `slots.inject` reconciler re-runs the callback.
-     *
-     * The value sits far below anything the page-local decrementing counter can
-     * produce (`allocatePriority: () => --this.nextPriority`,
-     * `dsh-cordis-client-runner/lib/client.js:615`), so it does not depend on how
-     * many other packages register first.
-     */
-    const SHADOWED_CELL_ID = 'subagent-catalog'
-    const SHADOW_PRIORITY = -9998
 
     /**
      * The sidebar hover-card seat.
@@ -197,21 +183,11 @@ window.__ModuleLoader__.load({
     const HOVER_SLOT_ID = 'subagent-model'
 
     /**
-     * Distance kept between the trigger and the menu, and between the menu and
-     * the viewport edge.
-     *
-     * Mirrors the shipped constant
-     * (`dsh-client-ui-subagent/lib/client.js:341`, `MENU_VIEWPORT_MARGIN = 16`),
-     * which the shipped `catalogMenuPosition` clamps against.
-     * @type {number}
-     */
-    const MENU_VIEWPORT_MARGIN = 16
-
-    /**
      * The portal mount point, resolved lazily.
      *
-     * The shipped dropdown portals to `document.body`; rendering the tree inside
-     * the header instead would let the conversation shell's overflow clip it.
+     * The shipped dropdown portals to `document.body`; rendering a panel inside
+     * the header or the composer instead would let the conversation shell's
+     * overflow clip it.
      *
      * @returns {Element | null} The portal host, or null without a document.
      */
@@ -259,33 +235,12 @@ window.__ModuleLoader__.load({
     /** @type {Record<string, string>} */
     const en = {
       'chip.prefix': 'model',
-      'chip.aria': 'Session model: {model}',
       'chip.title': 'This session runs on {model}',
       'chip.titleWithEffort': 'This session runs on {model} at {effort} effort',
       'chip.titleInherited': 'This session inherited {model} from its parent',
       'chip.unknown': 'no model yet',
       'chip.pending': 'switching',
       'chip.inherited': 'inherited',
-      'chip.total': '{count} in total, nested included',
-      'chip.differs': 'Own model {model} — differs from the parent ({parent})',
-      'chip.treeInherited': 'Inherits {model} from its parent',
-      'chip.own': 'Own model {model}',
-      'chip.countTotal': '{count} subagents',
-      'chip.countRunning': '{count} running',
-      'chip.treeAria': 'Subagent sessions',
-      'chip.loading': 'Loading subagents…',
-      'chip.loadError': 'Unable to load subagents',
-      'chip.retry': 'Retry',
-      'chip.openAside': 'Open aside',
-      'chip.openAsideAria': 'Open {label} aside',
-      'chip.modeOneShot': 'one-shot',
-      'chip.modeContinuable': 'continuable',
-      'chip.modeUnknown': 'mode unknown',
-      'chip.actRunning': 'running',
-      'chip.actCompleted': 'completed',
-      'chip.actInactive': 'idle',
-      'chip.branchExpand': 'Expand {label}',
-      'chip.branchCollapse': 'Collapse {label}',
       'tip.summary': '{count} subagents:',
       'tip.byDepth': 'By generation:',
       'tip.depth': 'gen {depth}',
@@ -295,7 +250,6 @@ window.__ModuleLoader__.load({
       'tip.efforts': 'Efforts: {efforts}',
       'tip.effortDefault': '{effort} (default)',
       'row.label': 'Model',
-      'row.unknown': 'No model yet',
       'row.inherited': 'Inherited from parent',
       'row.inheritedFrom': 'inherited',
       'row.title': 'The model this session last used, or is about to use',
@@ -314,15 +268,6 @@ window.__ModuleLoader__.load({
       'row.mode': 'Kind',
       'row.modeOneShot': 'one-shot, read-only',
       'row.modeContinuable': 'continuable',
-      // Per-turn route history, owned by the companion chunk
-      // src/client.route-history.js, which renders these through the
-      // conversation.chat.turnTail seat. They sit here so the two flattened
-      // dictionaries below stay the single pair this plugin owns.
-      'route.label': 'Ran on',
-      'route.title': 'This turn ran on {model}',
-      'route.switchedTitle': 'This turn ran on {model}, re-routed from {from}',
-      'route.effortDefaulted': '(adapter default)',
-      'route.switchedFrom': '(was {from})',
       // The composer-dock chip, owned by the bottom-bar seat.
       'dock.subagents': '{count} subagents in this run',
       'dock.subagentsShort': 'agents',
@@ -332,33 +277,12 @@ window.__ModuleLoader__.load({
     /** @type {Record<string, string>} */
     const ro = {
       'chip.prefix': 'model',
-      'chip.aria': 'Modelul sesiunii: {model}',
       'chip.title': 'Această sesiune folosește {model}',
       'chip.titleWithEffort': 'Această sesiune folosește {model} cu efort {effort}',
       'chip.titleInherited': 'Această sesiune a moștenit {model} de la părinte',
       'chip.unknown': 'fără model încă',
       'chip.pending': 'se schimbă',
       'chip.inherited': 'moștenit',
-      'chip.total': '{count} în total, inclusiv cei imbricați',
-      'chip.differs': 'Model propriu {model} — diferit de al părintelui ({parent})',
-      'chip.treeInherited': 'Moștenește {model} de la părinte',
-      'chip.own': 'Model propriu {model}',
-      'chip.countTotal': '{count} subagenți',
-      'chip.countRunning': '{count} în execuție',
-      'chip.treeAria': 'Sesiuni subagent',
-      'chip.loading': 'Se încarcă subagenții…',
-      'chip.loadError': 'Nu se pot încărca subagenții',
-      'chip.retry': 'Reîncearcă',
-      'chip.openAside': 'În lateral',
-      'chip.openAsideAria': 'Deschide {label} în lateral',
-      'chip.modeOneShot': 'one-shot',
-      'chip.modeContinuable': 'continuabil',
-      'chip.modeUnknown': 'tip necunoscut',
-      'chip.actRunning': 'în execuție',
-      'chip.actCompleted': 'finalizat',
-      'chip.actInactive': 'inactiv',
-      'chip.branchExpand': 'Extinde {label}',
-      'chip.branchCollapse': 'Restrânge {label}',
       'tip.summary': '{count} subagenți:',
       'tip.byDepth': 'Pe generații:',
       'tip.depth': 'gen {depth}',
@@ -368,7 +292,6 @@ window.__ModuleLoader__.load({
       'tip.efforts': 'Eforturi: {efforts}',
       'tip.effortDefault': '{effort} (implicit)',
       'row.label': 'Model',
-      'row.unknown': 'Niciun model încă',
       'row.inherited': 'Moștenit de la părinte',
       'row.inheritedFrom': 'moștenit',
       'row.title': 'Modelul pe care această sesiune l-a folosit ultima dată sau urmează să-l folosească',
@@ -391,11 +314,6 @@ window.__ModuleLoader__.load({
       // src/client.route-history.js, which renders these through the
       // conversation.chat.turnTail seat. They sit here so the two flattened
       // dictionaries below stay the single pair this plugin owns.
-      'route.label': 'A rulat pe',
-      'route.title': 'Această tură a rulat pe {model}',
-      'route.switchedTitle': 'Această tură a rulat pe {model}, schimbată de la {from}',
-      'route.effortDefaulted': '(implicit din adaptor)',
-      'route.switchedFrom': '(era {from})',
       // The composer-dock chip, owned by the bottom-bar seat.
       'dock.subagents': '{count} subagenți în această rulare',
       'dock.subagentsShort': 'agenți',
@@ -430,41 +348,6 @@ window.__ModuleLoader__.load({
       '.dsh-smr-rowValue{color:var(--dsw-alias-label-secondary);min-width:0;font-size:calc(12px + var(--dsh-content-font-delta,0px));line-height:calc(18px + var(--dsh-content-font-delta,0px));word-break:break-word}',
       '.dsh-smr-rowValueUnknown{color:var(--dsw-alias-label-caption)}',
       '.dsh-smr-rowInherited{color:var(--dsw-alias-label-caption);flex:none;opacity:.8}',
-      // Tree metrics lifted from the shipped SubagentHeaderLineage stylesheet
-      // (dsh-client-ui-subagent/lib/client.js:12) so the replaced dropdown keeps
-      // the shipped geometry: same radii, same menu width, same shadow token.
-      '.dsh-smt-root{align-items:center;gap:10px;min-width:0;display:inline-flex;position:relative}',
-      '.dsh-smt-trigger{border-radius:var(--dsw-radius-sm);min-height:28px;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:0;align-items:center;gap:4px;padding:3px 2px;font-size:12px;line-height:18px;display:inline-flex;font-family:inherit}',
-      '.dsh-smt-trigger:hover,.dsh-smt-trigger:focus-visible{color:var(--dsw-alias-label-primary)}',
-      '.dsh-smt-count{font-variant-numeric:tabular-nums}',
-      '.dsh-smt-chevron{transition:transform .12s}',
-      '.dsh-smt-triggerOpen .dsh-smt-chevron{transform:rotate(180deg)}',
-      '.dsh-smt-menu{z-index:100;box-sizing:border-box;border-radius:var(--dsw-radius-lg);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);width:336px;max-width:min(400px,100vw - 32px);max-height:min(560px,100vh - 140px);box-shadow:var(--dsw-elevation-prominent);flex-direction:column;padding:3px;display:flex;position:fixed;overflow:hidden}',
-      '.dsh-smt-menu:before{content:"";z-index:-1;border-radius:inherit;background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);position:absolute;inset:0}',
-      '.dsh-smt-menuBody{flex-direction:column;flex:auto;min-height:0;display:flex;overflow-y:auto;padding:2px}',
-      '.dsh-smt-node{min-width:0}',
-      '.dsh-smt-row{align-items:center;gap:6px;border-radius:var(--dsw-radius-sm);padding:4px 6px;cursor:pointer;min-width:0;color:var(--dsw-alias-label-primary);display:flex}',
-      '.dsh-smt-row:hover,.dsh-smt-row:focus-visible{background:var(--dsw-alias-interactive-bg-hover);outline:none}',
-      '.dsh-smt-clickarea{flex:1;min-width:0}',
-      '.dsh-smt-content{min-width:0;display:flex;flex-direction:column;gap:1px}',
-      '.dsh-smt-label{text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:16px;overflow:hidden}',
-      '.dsh-smt-currentLabel{font-weight:500}',
-      '.dsh-smt-summary{color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;font-size:11px;line-height:14px;overflow:hidden}',
-      '.dsh-smt-activitySlot{width:14px;height:14px;flex:none;border-radius:50%;background:var(--dsw-alias-label-tertiary);opacity:.55}',
-      '.dsh-smt-disclosure{border:0;background:0 0;color:var(--dsw-alias-label-tertiary);cursor:pointer;padding:0;width:12px;flex:none;display:inline-flex;align-items:center;justify-content:center;font-size:14px;line-height:1;transition:transform .12s}',
-      '.dsh-smt-disclosureOpen{transform:rotate(90deg)}',
-      '.dsh-smt-disclosureSpace{width:12px;flex:none;display:inline-block}',
-      '.dsh-smt-children{border-inline-start:1px solid var(--dsw-alias-border-l2);margin-inline-start:11px;padding-inline-start:4px}',
-      '.dsh-smt-sidebarButton{border:0;background:0 0;color:var(--dsw-alias-label-tertiary);cursor:pointer;flex:none;padding:2px 4px;font-size:11px;font-family:inherit}',
-      '.dsh-smt-sidebarButton:hover{color:var(--dsw-alias-label-primary)}',
-      '.dsh-smt-notice,.dsh-smt-error{color:var(--dsw-alias-label-tertiary);padding:6px;font-size:12px}',
-      '.dsh-smt-error{align-items:center;gap:8px;display:flex;color:var(--dsw-alias-label-danger)}',
-      '.dsh-smt-refresh{border:0;background:0 0;color:var(--dsw-alias-label-primary);cursor:pointer;text-decoration:underline;padding:0;font-family:inherit}',
-      // The route marker: quiet when the child merely inherited its parent's
-      // model, accented when it carries a DIFFERENT one of its own.
-      '.dsh-smt-model{border-radius:var(--dsw-radius-sm);color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-layer-2);text-overflow:ellipsis;white-space:nowrap;flex:none;max-width:132px;overflow:hidden;padding:1px 5px;font-size:11px;line-height:15px}',
-      '.dsh-smt-modelDiffers{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);font-weight:500}',
-      // The bottom-bar dock chip. Metrics copied from the ContextMeter trigger it
       // shares the row with (research/context-meter-anatomy.md §"The trigger"):
       // the shell's secondary content-font tokens, tabular numerals so the count
       // does not jitter as it changes, and one hover/open rule so the control
@@ -589,24 +472,6 @@ window.__ModuleLoader__.load({
     /* ------------------------------------------------------------------ *
      * Components.
      * ------------------------------------------------------------------ */
-
-    /**
-     * The summary a render that will draw no trigger gets.
-     *
-     * Shared and frozen so the guard in {@link SubagentModelTree} can skip the
-     * walk without allocating: the tooltip thunk reads `groups`, `running`,
-     * `total` and `byDepth` off it, and a fresh object per render would defeat
-     * the memo that is meant to be doing the skipping.
-     * @type {{groups: Array<object>, total: number, distinct: number, inherited: number, running: number, byDepth: Array<object>}}
-     */
-    const EMPTY_SUMMARY = Object.freeze({
-      groups: Object.freeze([]),
-      total: 0,
-      distinct: 0,
-      inherited: 0,
-      running: 0,
-      byDepth: Object.freeze([]),
-    })
 
     /**
      * The header chip for the ACTIVE session.
@@ -973,530 +838,6 @@ window.__ModuleLoader__.load({
 
 
     /**
-     * One model's marker inside a tree row.
-     *
-     * The point is to see AT A GLANCE which subagent is different, so the
-     * inherited case gets no marker at all: with model selection off (the
-     * `subagent` default, `dsh-tool-subagent/README.md:47`) every child inherits
-     * its parent's route, so marking each one would mark all of them and say
-     * nothing. A marker therefore appears only for a subagent whose route is
-     * its OWN — and the tooltip states plainly whether that differs from the
-     * parent's, which is the case a user is actually looking for.
-     *
-     * @param {{route: object, parentModel: string}} entry - The row's resolved route and its parent's model.
-     * @param {string} id - Child session id, for the row key.
-     * @param {string} t - Bound translator.
-     * @returns {object | null} The marker, or null when there is nothing to mark.
-     */
-    function routeMarker(entry, id, t) {
-      const { route, parentModel } = entry
-      if (route.model === '') return null
-
-      const own = route.source !== 'inherited'
-      const differs = own && parentModel !== '' && route.model !== parentModel
-      if (!own && !differs) return null
-
-      const title = differs
-        ? t('chip.differs', { model: route.model, parent: parentModel })
-        : route.source === 'inherited'
-          ? t('chip.treeInherited', { model: route.model })
-          : t('chip.own', { model: route.model })
-
-      const badge = h(
-        'span',
-        { className: differs ? 'dsh-smt-model dsh-smt-modelDiffers' : 'dsh-smt-model dsh-smt-modelInherited' },
-        route.model,
-      )
-
-      return Tooltip !== null
-        ? h(Tooltip, { label: title, side: 'bottom', portal: true, maxWidth: 240 }, h('span', { key: id }, badge))
-        : h('span', { key: id, className: 'dsh-smt-model', title }, badge)
-    }
-
-    /**
-     * One level of the tree, recursing only through explicitly expanded rows.
-     *
-     * Mirrors the shipped `CatalogRows` (`dsh-client-ui-subagent/lib/client.js:164`)
-     * — including its disclosure triangle, activity dot, token and duration
-     * metrics, sidebar button, error row and refresh — with two additions per
-     * row: the route marker from {@link routeMarker}, and the row's part in
-     * roving focus.
-     *
-     * Roving focus is why this component carries no focus state of its own. The
-     * widget is ONE tab stop: `rowIds` is the drawn rows in visual order and
-     * `activeRowId` names the row holding it, both computed once by
-     * {@link SubagentModelTree} and threaded down through `props`. A row that is
-     * not the active one renders `tabIndex: -1`, so Shift+Tab out of the menu
-     * leaves rather than walking every row. Arrow keys and Home/End pick a new
-     * `activeRowId` by index in `rowIds`; the movement itself is the effect in
-     * {@link SubagentModelTree}, which owns the menu's DOM node and can move
-     * real focus there. `Enter` and `Space` open the row, `ArrowRight`/`ArrowLeft`
-     * expand and collapse, unchanged.
-     *
-     * @param {object} props - The recursion's own props.
-     * @returns {object} A React fragment holding this level's rows.
-     */
-    function SubagentTreeRows(props) {
-      const {
-        parentSessionId, currentSessionId, catalogs, summaries, expanded, level,
-        projections, byId, rowIds, activeRowId, setActiveRow,
-        openChild, openChildAside, refreshProjection, toggleBranch, t, m,
-      } = props
-
-      const catalog = catalogs[parentSessionId]
-      if (catalog === undefined) return null
-
-      const emptyLoading = catalog.state === 'loading' && catalog.entries.length === 0
-      const reserveDisclosure = catalog.entries.some((entry) => !isKnownLeaf(catalogs[entry.id]))
-
-      return h(
-        React.Fragment,
-        null,
-        emptyLoading ? h('div', { className: 'dsh-smt-notice' }, t('chip.loading')) : null,
-        catalog.state === 'error'
-          ? h(
-              'div',
-              { className: 'dsh-smt-error' },
-              h('span', null, catalog.error?.message ?? t('chip.loadError')),
-              h(
-                'button',
-                { type: 'button', className: 'dsh-smt-refresh', onClick: () => refreshProjection(parentSessionId) },
-                t('chip.retry'),
-              ),
-            )
-          : null,
-        catalog.entries.map((entry) => {
-          const childCatalog = catalogs[entry.id]
-          const isCurrent = entry.id === currentSessionId
-          const isExpanded = expanded.has(entry.id)
-          const knownLeaf = isKnownLeaf(childCatalog)
-          const summary = summaries[entry.id]
-          const label = entry.label ?? entry.id
-          const mode = entry.mode === 'unknown' ? t('chip.modeUnknown') : entry.mode === 'one-shot' ? t('chip.modeOneShot') : t('chip.modeContinuable')
-          const completed = entry.activity === 'inactive' && summary?.projectionValues?.subagentTiming?.lastTurnCompleted === true
-          const activity = entry.activity === 'running' ? t('chip.actRunning') : completed ? t('chip.actCompleted') : t('chip.actInactive')
-          const secondary = [summary?.title, mode, activity].filter((value) => value !== undefined).join(' · ')
-
-          const route = m.resolveRoute(projections, byId, entry.id)
-          const parentRoute = m.resolveRoute(projections, byId, parentSessionId)
-          const marker = routeMarker({ route, parentModel: parentRoute.model }, entry.id, t)
-
-          const open = () => {
-            openChild({ parentSessionId, childSessionId: entry.id, mode: entry.mode })
-            props.closeCatalog()
-          }
-          const openAside = (event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            openChildAside({ parentSessionId, childSessionId: entry.id, mode: entry.mode })
-          }
-          const handleKey = (event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault()
-              event.stopPropagation()
-              open()
-            } else if ((event.key === 'ArrowRight' && !knownLeaf && !isExpanded) || (event.key === 'ArrowLeft' && isExpanded)) {
-              event.preventDefault()
-              event.stopPropagation()
-              toggleBranch(entry.id)
-            } else {
-              const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0
-              let target = null
-              if (step !== 0) target = rowIds[rowIds.indexOf(entry.id) + step]
-              else if (event.key === 'Home') target = rowIds[0]
-              else if (event.key === 'End') target = rowIds[rowIds.length - 1]
-              if (target !== null && target !== undefined) {
-                event.preventDefault()
-                event.stopPropagation()
-                setActiveRow(target)
-              }
-            }
-          }
-          // A click is a selection, so it moves the roving tab stop with it —
-          // otherwise the next Tab would return focus to a row the user just
-          // left.
-          const activate = () => setActiveRow(entry.id)
-          const toggle = (event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            toggleBranch(entry.id)
-          }
-
-          return h(
-            'div',
-            { key: entry.id, className: 'dsh-smt-node' },
-            h(
-              'div',
-              {
-                role: 'treeitem',
-                // Stable per row so the arrow keys can FIND the element they
-                // must move focus to, from the menu's own DOM rather than from a
-                // ref map this file would otherwise have to thread through the
-                // recursion.
-                id: rowDomId(entry.id),
-                'data-treeitem': entry.id,
-                tabIndex: entry.id === activeRowId ? 0 : -1,
-                'aria-level': level,
-                'aria-selected': entry.id === activeRowId,
-                'aria-current': isCurrent || undefined,
-                'aria-label': [label, secondary].filter((value) => value !== '').join(' '),
-                ...(knownLeaf ? {} : { 'aria-expanded': isExpanded }),
-                className: 'dsh-smt-row',
-                onClick: (event) => {
-                  activate()
-                  open(event)
-                },
-                onKeyDown: handleKey,
-              },
-              knownLeaf
-                ? reserveDisclosure ? h('span', { className: 'dsh-smt-disclosureSpace' }) : null
-                : h(
-                    'button',
-                    {
-                      type: 'button',
-                      tabIndex: -1,
-                      className: isExpanded ? 'dsh-smt-disclosure dsh-smt-disclosureOpen' : 'dsh-smt-disclosure',
-                      'aria-label': t(isExpanded ? 'chip.branchCollapse' : 'chip.branchExpand', { label }),
-                      onClick: toggle,
-                    },
-                    '›',
-                  ),
-              h('span', { className: 'dsh-smt-activitySlot' }),
-              h(
-                'div',
-                { className: 'dsh-smt-clickarea' },
-                h(
-                  'span',
-                  { className: 'dsh-smt-content' },
-                  h(
-                    'span',
-                    { className: isCurrent ? 'dsh-smt-label dsh-smt-currentLabel' : 'dsh-smt-label' },
-                    label,
-                  ),
-                  h('span', { className: 'dsh-smt-summary' }, secondary),
-                ),
-              ),
-              marker,
-              !isCurrent && Tooltip !== null
-                ? h(
-                    Tooltip,
-                    { label: t('chip.openAside'), side: 'bottom', align: 'end' },
-                    h(
-                      'button',
-                      {
-                        type: 'button',
-                        className: 'dsh-smt-sidebarButton',
-                        'aria-label': t('chip.openAsideAria', { label }),
-                        onClick: openAside,
-                        onKeyDown: (event) => {
-                          if (event.key === 'Enter' || event.key === ' ') openAside(event)
-                        },
-                      },
-                      t('chip.openAside'),
-                    ),
-                  )
-                : null,
-            ),
-            isExpanded && !knownLeaf
-              ? h('div', { className: 'dsh-smt-children' }, h(SubagentTreeRows, {
-                  ...props,
-                  parentSessionId: entry.id,
-                  level: level + 1,
-                }))
-              : null,
-          )
-        }),
-      )
-    }
-
-    /**
-     * Whether a child is a known leaf.
-     *
-     * Mirrors the shipped `isKnownLeaf` (`dsh-client-ui-subagent/lib/client.js:160`):
-     * a child becomes a leaf only once its OWN catalog has loaded and is empty,
-     * which is what makes the disclosure triangle honest rather than optimistic.
-     *
-     * @param {any} catalog - The child's catalog entry.
-     * @returns {boolean} Whether the child definitively has no children.
-     */
-    function isKnownLeaf(catalog) {
-      return catalog?.state === 'ready' && catalog.entries.length === 0
-    }
-
-    /**
-     * The rows the menu actually draws, in the order it draws them.
-     *
-     * `SubagentTreeRows` recurses depth-first and draws each level's entries in
-     * catalog order, so this sequence is both the visual order and the order
-     * `querySelectorAll` reports. It exists because a row needs its own position
-     * in that sequence at RENDER time — the roving `tabIndex` is one tabbable
-     * row, and it is whichever row holds that position — and the recursion
-     * cannot hand it out without either a render-time counter or this walk.
-     *
-     * @param {Record<string, any>} catalogs - Loaded catalog per session id.
-     * @param {Set<string>} expanded - Expanded branch ids.
-     * @param {string} parentSessionId - The session whose children the menu roots at.
-     * @returns {Array<string>} Drawn row session ids, in visual order.
-     */
-    function visibleRowIds(catalogs, expanded, parentSessionId) {
-      const ids = []
-      const walk = (parentId) => {
-        const catalog = catalogs[parentId]
-        if (catalog === undefined) return
-        for (const entry of catalog.entries) {
-          ids.push(entry.id)
-          if (expanded.has(entry.id) && !isKnownLeaf(catalogs[entry.id])) walk(entry.id)
-        }
-      }
-      walk(parentSessionId)
-      return ids
-    }
-
-    /**
-     * The DOM id one tree row is addressable by.
-     *
-     * Session ids are opaque strings, so they cannot go into a selector unquoted;
-     * the menu instead looks its rows up by `data-treeitem`, and this id exists
-     * so assistive technology has a real element id to anchor to.
-     *
-     * @param {string} id - Child session id.
-     * @returns {string} The row's DOM id.
-     */
-    function rowDomId(id) {
-      return `dsh-smt-row-${String(id)}`
-    }
-
-    /**
-     * The trigger-plus-tree dropdown that replaces the shipped catalog pill.
-     *
-     * This half claims the `subagent-catalog` CELL of
-     * `conversation.session.header.actions`, so the shipped `SubagentCatalogAction`
-     * stays registered but is no longer rendered
-     * (`dsh-cordis-client-runner/lib/client.js:3547` lists it as an occupant).
-     * The replacement exists for one reason the shipped component cannot serve:
-     * its rows carry no model, and there is no extension point per row — the
-     * shipped `CatalogRows` is internal to
-     * `@deepseek-ai/dsh-client-ui-subagent` and renders no slot
-     * (`:164-338`), so a marker beside a subagent requires owning the cell.
-     *
-     * @param {object} props - Session standard props plus the catalog actions and translator.
-     * @returns {object} React element, or null on a session with no subagents.
-     */
-    function SubagentModelTree(props) {
-      const { sessionId, useSessions, useSessionStatus, openChild, openChildAside, refreshProjection, t, m } = props
-
-      const readSessions = asHook(useSessions)
-      const readStatus = asHook(useSessionStatus)
-
-      const projections = readSessions((state) => state.projectionsBySession)
-      const byId = readSessions((state) => state.byId)
-      // The shipped rows read a summary row for the child's title and completed
-      // flag (`dsh-client-ui-subagent/lib/client.js:197,200`); the list rows ARE
-      // that source, so `byId` serves both the route lookup and the row metadata.
-      const summaries = byId
-      const statusMap = readStatus((value) => value)
-      const isChild = readSessions((state) => state.byId[sessionId]?.origin === 'subagent')
-
-      // Every session in `byId` is a candidate, NOT only the ones with a
-      // resident store: `projectionsBySession` is populated lazily, so a session
-      // that was never opened has no entry there and its catalog lives only on the
-      // list row's `projectionValues`. Iterating `projections` alone therefore
-      // dropped exactly the sessions the catalog is about. The read itself is the
-      // chunk's `catalogFor`, which is the one rule the chip, the hover row and the
-      // summary walk all use.
-      const catalogs = (0, React.useMemo)(() => {
-        const result = {}
-        for (const id of Object.keys(byId ?? {})) {
-          const snapshot = projections?.[id]
-          const entries = m.catalogFor(projections ?? {}, byId, id)
-          result[id] = {
-            state: snapshot?.state !== undefined && snapshot.state !== 'idle'
-              ? snapshot.state
-              : (entries === undefined ? 'loading' : 'ready'),
-            error: snapshot?.error,
-            entries: (entries ?? []).map((entry) => ({
-              ...entry,
-              activity: (statusMap?.get?.(entry.id)?.running ?? byId?.[entry.id]?.running) === true ? 'running' : 'inactive',
-            })),
-          }
-        }
-        return result
-      }, [projections, byId, statusMap, m])
-
-      const catalog = catalogs[sessionId]
-      const [open, setOpen] = React.useState(false)
-      const [expanded, setExpanded] = React.useState(() => new Set())
-      const rootRef = React.useRef(null)
-      const triggerRef = React.useRef(null)
-      const menuRef = React.useRef(null)
-      const [menuPosition, setMenuPosition] = React.useState()
-
-      // ROVING FOCUS. `role: "tree"` is only honest when the rows can actually
-      // be walked: the WAI-ARIA tree pattern makes the WIDGET a single tab stop
-      // and moves DOM focus with the arrow keys. `activeId` names the row that
-      // holds it, which is the only one given `tabIndex: 0`.
-      const [activeId, setActiveId] = React.useState(null)
-
-      const toggleBranch = React.useCallback((childSessionId) => {
-        setExpanded((current) => {
-          const next = new Set(current)
-          if (next.has(childSessionId)) next.delete(childSessionId)
-          else {
-            next.add(childSessionId)
-            refreshProjection(childSessionId)
-          }
-          return next
-        })
-      }, [refreshProjection])
-
-      // Menu-open and catalog-change both strand `activeId` on a row that is no
-      // longer drawn, which would leave the widget with no tabbable row at all.
-      // Re-anchor on the first drawn row whenever the active one is gone.
-      const rowIds = visibleRowIds(catalogs, expanded, sessionId)
-      const activeRowId = activeId !== null && rowIds.includes(activeId) ? activeId : (rowIds[0] ?? null)
-
-      // Focus has to wait for the row the state change re-renders, so it rides
-      // the commit rather than the key event. The id is the dependency on
-      // purpose: re-running this on every render would steal focus back from
-      // whatever inside the row the user clicked.
-      React.useEffect(() => {
-        if (open === false || activeRowId === null) return
-        menuRef.current?.querySelector('[data-treeitem="' + activeRowId + '"]')?.focus()
-      }, [open, activeRowId])
-
-      // Menus close on an outside pointer, exactly as the shipped dropdown does
-      // (`dsh-client-ui-subagent/lib/client.js:457-466`).
-      React.useEffect(() => {
-        if (!open) return undefined
-        const closeOutside = (event) => {
-          if (event.target instanceof Node && rootRef.current?.contains(event.target) === false && menuRef.current?.contains(event.target) === false) {
-            setOpen(false)
-            setExpanded(new Set())
-          }
-        }
-        document.addEventListener('pointerdown', closeOutside)
-        return () => document.removeEventListener('pointerdown', closeOutside)
-      }, [open])
-
-      // Portalled placement below the trigger, clamped to the viewport edge.
-      React.useEffect(() => {
-        if (!open) return undefined
-        const placeMenu = () => {
-          const trigger = triggerRef.current
-          if (trigger === null) return
-          const rect = trigger.getBoundingClientRect()
-          const width = Math.min(336, window.innerWidth - MENU_VIEWPORT_MARGIN * 2)
-          setMenuPosition({
-            top: rect.bottom + MENU_VIEWPORT_MARGIN,
-            left: Math.min(Math.max(MENU_VIEWPORT_MARGIN, rect.left), window.innerWidth - width - MENU_VIEWPORT_MARGIN),
-          })
-        }
-        placeMenu()
-        window.addEventListener('resize', placeMenu)
-        window.addEventListener('scroll', placeMenu, true)
-        return () => {
-          window.removeEventListener('resize', placeMenu)
-          window.removeEventListener('scroll', placeMenu, true)
-        }
-      }, [open])
-
-      const directCount = catalog?.entries.length ?? 0
-      const runningCount = catalog?.entries.filter((entry) => entry.activity === 'running').length ?? 0
-
-      // Whether this header will render a trigger at all — the guard the walk
-      // has to respect. A subagent's own header is the case that makes it worth
-      // respecting: it can have a populated catalog of its own, so an unguarded
-      // walk would resolve a route for every one of its descendants and then
-      // render nothing at all.
-      const wanted = !isChild && directCount > 0
-
-      // The model summary rides in the trigger's tooltip, so the headline stays
-      // the count the shipped pill always showed. Keyed on the three real
-      // inputs plus the guard, exactly as the `catalogs` memo above: the summary
-      // is a pure function of the projection map, the row map and the root id.
-      //
-      // The guard is INSIDE the factory, not an early return above it. A hook
-      // placed after a conditional return is a hook-order violation, and the
-      // condition here is session state that changes: `isChild` flips when a
-      // subagent is opened and `directCount` flips when the catalog loads, so a
-      // deferred `useMemo` would change the hook count between renders of one
-      // mounted component.
-      const summary = (0, React.useMemo)(() => (
-        wanted ? m.summarizeSubagentModels(projections, byId, sessionId) : EMPTY_SUMMARY
-      ), [projections, byId, sessionId, wanted])
-
-      // Both of these renders NOTHING. They stay where they are — after every
-      // hook, before the trigger — so a header with no subagents builds no
-      // button, no portal and no tooltip.
-      if (isChild) return null
-      // `catalogs` now carries an entry for every session the store knows, so the
-      // meaningful test is the count: a header with no subagents builds no button,
-      // no portal and no tooltip. This matches the shipped pill, which also draws
-      // nothing for an empty catalog.
-      if (directCount === 0) return null
-
-      const triggerTooltip = () => {
-        const lines = [t(summary.running > 0 ? 'tip.running' : 'tip.summary', { count: m.formatCount(summary.running > 0 ? runningCount : directCount) })]
-        for (const group of summary.groups) lines.push(`  ${m.formatModelGroup(group)}`)
-        if (summary.total !== directCount) {
-          lines.push(t('chip.total', { count: m.formatCount(summary.total) }))
-        }
-        return lines.join('\n')
-      }
-
-      const trigger = h(
-        'button',
-        {
-          ref: triggerRef,
-          type: 'button',
-          className: open ? 'dsh-smt-trigger dsh-smt-triggerOpen' : 'dsh-smt-trigger',
-          'aria-haspopup': 'tree',
-          'aria-expanded': open,
-          'aria-label': t(runningCount > 0 ? 'chip.countRunning' : 'chip.countTotal', { count: m.formatCount(runningCount > 0 ? runningCount : directCount) }),
-          onClick: () => setOpen((value) => !value),
-        },
-        h('span', { className: 'dsh-smt-count' }, m.formatCount(directCount)),
-        h('span', { className: 'dsh-smt-chevron' }, '▾'),
-      )
-
-      const treeProps = {
-        parentSessionId: sessionId,
-        currentSessionId: sessionId,
-        catalogs,
-        summaries,
-        expanded,
-        level: 1,
-        projections,
-        byId,
-        rowIds,
-        activeRowId,
-        setActiveRow: setActiveId,
-        openChild: (address) => openChild(address),
-        openChildAside: (address) => openChildAside(address),
-        refreshProjection,
-        toggleBranch,
-        closeCatalog: () => setOpen(false),
-        t,
-        m,
-      }
-
-      return h(
-        'span',
-        { className: 'dsh-smt-root', ref: rootRef },
-        Tooltip !== null
-          ? h(Tooltip, { label: triggerTooltip, side: 'bottom', portal: true, maxWidth: 320 }, trigger)
-          : h('span', { title: triggerTooltip() }, trigger),
-        open && createPortal !== null
-          ? h(
-              portalTarget(),
-              { className: 'dsh-smt-menu', style: menuPosition, ref: menuRef },
-              h('div', { role: 'tree', className: 'dsh-smt-menuBody', 'aria-label': t('chip.treeAria') }, h(SubagentTreeRows, treeProps)),
-            )
-          : null,
-      )
-    }
-
-    /**
      * The composer-dock seat — the bottom bar.
      *
      * `conversation.composer.dock` is a `kind: "list"`, `scope: "session"` slot
@@ -1853,45 +1194,6 @@ window.__ModuleLoader__.load({
         ? null
         : () => remoteService.modelCatalog()
 
-      // The actions the replaced catalog cell needs in order to still WORK.
-      //
-      // Taking over `subagent-catalog` means taking over its whole component
-      // contract, and navigation is part of that contract: the shipped
-      // `SubagentCatalogAction` receives `openChild`, `openChildAside` and
-      // `refreshProjection` through its registration's `inject`, and a row that
-      // cannot open a subagent is a dropdown that lists things you cannot reach.
-      // So this half supplies the same three, from the same services, with the
-      // same canonical address the shipped dropdown builds
-      // (`dsh-client-ui-subagent/lib/client.js:692-704, :949-962`).
-      //
-      // They are read through `ctx.get` rather than declared on `inject`, for the
-      // reason `loadCatalog` above gives: naming a service parks this half until
-      // that service exists, and the header chip must not wait behind the
-      // workspace/right-sidebar chain to draw. A service that is absent yields
-      // no-op actions instead, so a partial host degrades to a read-only tree
-      // rather than a throwing one.
-      const catalogActions = {
-        openChild: (address) => {
-          const workspace = ctx.get('uiWorkspace')
-          if (workspace !== null && workspace !== undefined && typeof workspace.openSession === 'function') workspace.openSession(address)
-        },
-        openChildAside: (address) => {
-          const right = ctx.get('sidebarRight')
-          if (right === null || right === undefined || typeof right.openResource !== 'function') return
-          const query = new URLSearchParams({ parent: address.parentSessionId, mode: address.mode })
-          right.openResource(
-            `dsh-resource://subagentchat/session/${encodeURIComponent(address.childSessionId)}?${query}`,
-            { kind: 'subagentchat', preferNewPane: true },
-          )
-        },
-        refreshProjection: (parentSessionId) => {
-          const sessions = ctx.get('sessions')
-          if (sessions !== null && sessions !== undefined && typeof sessions.refreshProjections === 'function') {
-            sessions.refreshProjections(parentSessionId)
-          }
-        },
-      }
-
       whenService(ctx, 'locale', (locale) => {
         if (locale === null || typeof locale !== 'object') return
 
@@ -1976,11 +1278,11 @@ window.__ModuleLoader__.load({
         // `inject` wraps it: the callback runs once the owner has declared the
         // slot, whenever that happens.
         //
-        // Both ids are FRESH, so neither seat displaces a shipped occupant: the
+        // All three ids are FRESH, so no seat displaces a shipped occupant: the
         // header chip is added beside the subagent-catalog pill and the job
-        // list, and the hover row beside the schedule row. That is the whole
-        // reason this plugin can use a declared order instead of a shadowing
-        // priority.
+        // list, the dock chip beside the built-in todo and queue cells, and the
+        // hover row beside the schedule row. Nothing here claims a shipped cell,
+        // so a failure in any one of them costs that seat and no other.
         //
         // Each `register` runs SYNCHRONOUSLY inside its callback and returns
         // its disposer, so the reconciler can unwind the entry when the
@@ -2011,47 +1313,6 @@ window.__ModuleLoader__.load({
           // intact rather than half-replacing them.
         }
 
-        // The route-marked tree takes OVER the shipped `subagent-catalog` cell
-        // rather than adding beside it, which is the one place a plugin cannot
-        // avoid: the shipped `CatalogRows` renders no per-row slot
-        // (`dsh-client-ui-subagent/lib/client.js:164-338`), so a marker beside a
-        // subagent requires owning the cell.
-        //
-        // The written `priority` is what makes that takeover work. Entries sort
-        // ascending and a `list` slot keeps only the FIRST entry per `id` cell
-        // (`dsh-client-ui-slots/lib/index.js:221`, `:278-293`), and a duplicate
-        // `id` is rejected only AT THE SAME priority (`:183-184`) — so a very low
-        // number both displaces the shipped occupant and keeps this entry from
-        // colliding with its OWN previous registration when the `slots.inject`
-        // reconciler re-runs. This is the measurement the sibling
-        // `dsh-subagent-tree` documents at `SHADOW_PRIORITY` (-9999).
-        try {
-          slots.inject(ACTIONS_SLOT, () => {
-            const dispose = slots.register(
-              {
-                name: ACTIONS_SLOT,
-                id: SHADOWED_CELL_ID,
-                priority: SHADOW_PRIORITY,
-                locale: NS,
-                // Load-bearing, not decoration: the three navigation actions are
-                // what let a row actually open a subagent and retry a failed
-                // load. Omitting `inject` here is what made the replaced tree
-                // render rows that could not be clicked open.
-                inject: () => catalogActions,
-              },
-              withModel(SubagentModelTree),
-            )
-            try {
-              if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'dsh-subagent-model: tree slot')
-            } catch (e) {
-              // The facade already binds the disposer to the calling fiber.
-            }
-            return dispose
-          })
-        } catch (e) {
-          // A slot that refuses the registration must leave the shipped catalog
-          // pill intact rather than half-replacing it.
-        }
 
         try {
           slots.inject(HOVER_SLOT, () => {

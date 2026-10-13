@@ -15,9 +15,10 @@
 <p align="center">
   See which model a DeepSeek Harness session is really running on. A chip in the
   header names the model and reasoning effort of whichever conversation is open —
-  including a subagent's — a dropdown marks which child carries its own route
-  instead of inheriting its parent's, and sidebar hover cards say what each
-  conversation actually did.
+  including a subagent's — a chip in the composer dock below the composer shows
+  which models a whole run delegated to, and sidebar hover cards say what each
+  conversation actually did. It only ever ADDS controls: the harness's own
+  subagent dropdown is left exactly as shipped.
 </p>
 
 ## Install
@@ -64,9 +65,8 @@ that fits the range.
 | seat | what it shows | where |
 | --- | --- | --- |
 | **header chip** | `model: <id> (effort)` for the **active** Session | beside the subagent pill in the conversation header |
-| **subagent tree** | the shipped subagent dropdown, with a **route marker** per row | the `subagent-catalog` header cell |
+| **bottom-bar chip** | how many subagents this run delegated to, and which models they ran on | `conversation.composer.dock`, below the composer beside the ContextMeter |
 | **hover-card rows** | model, effort, work done, active time, tokens, cache, context window, task, kind | inside every Session's hover card in the sidebar |
-| **per-turn row** | which model each turn actually ran on, and what it switched from | the action row under a completed turn |
 
 The chip's tooltip also names the reasoning efforts a model offers and which one
 is its default, read from the live model catalog. A model the catalog does not
@@ -141,32 +141,28 @@ To pin every subagent's model, set `modelSelectionSettings: true` on the
 `subagent` tool and pass a route per call; `list_subagent_models` then becomes
 available for discovery.
 
-## Four seats, and why the tree replaces rather than adds
+## Three seats, and why none of them replaces anything
 
-The chip, the hover rows and the per-turn row ADD a cell each, so nothing
-shipped is displaced. The tree cannot: the shipped `CatalogRows` renders no
-per-row slot
-(`dsh-client-ui-subagent/lib/client.js:164-338`), so a marker beside a subagent
-requires owning the `subagent-catalog` cell itself. It therefore claims that id
-at a written `priority: -9998`, which is what makes a `list` slot keep it
-instead of the shipped occupant (`dsh-client-ui-slots/lib/index.js:221`,
-`:278-293`) while a duplicate id is rejected only at the *same* priority
-(`:183-184`).
+Every seat ADDS a cell with its own `id`, so no shipped occupant is displaced
+and the harness's own subagent dropdown is left exactly as shipped. That is not
+an aesthetic choice: an earlier version of this plugin claimed the
+`subagent-catalog` header cell at `priority: -9998` in order to put a model
+marker beside each subagent row, because the shipped `CatalogRows` renders no
+per-row slot (`dsh-client-ui-subagent/lib/client.js:164-338`). Replacing that
+cell means reimplementing its entire navigation contract — `openChild`,
+`openChildAside`, `refreshProjection`, the tree walk, the focus model — and every
+mistake in that reimplementation removes the **stock subagent list** from the
+header. It did; the list stopped appearing.
 
-That number is **-9998 and not -9999** on purpose: the sibling
-`dsh-subagent-tree` claims the same cell at -9999, and co-installed the two would
-collide at one priority and throw, blanking the header.
-
-That takeover is the one decision worth knowing about: removing the
-`SHADOWED_CELL_ID` registration in `src/client.js` restores the shipped
-dropdown and loses the markers, and nothing else depends on it.
+The per-subagent model breakdown now lives in the bottom-bar chip instead, which
+needs none of that machinery. `scripts/check-plugin.mjs` asserts that nothing
+claims or shadows a shipped cell, so the takeover cannot quietly return.
 
 | slot | declared by | this plugin |
 | --- | --- | --- |
-| `conversation.session.header.actions` | `dsh-client-ui-conversation/lib/index.js:18268-18271` | `id 'subagent-model'` (chip), and `id 'subagent-catalog'` at `priority -9998` (tree) |
+| `conversation.session.header.actions` | `dsh-client-ui-conversation/lib/index.js:18268-18271` | `id 'subagent-model'` (chip) |
+| `conversation.composer.dock` | `dsh-client-ui-conversation/lib/index.js:18329-18332` | `id 'subagent-model-dock'` at `order 40` (bottom bar) |
 | `sidebar.session.row.hover` | `dsh-client-ui-workspace/lib/index.js:4322-4325` | `id 'subagent-model'` |
-| `conversation.chat.turnTail` | `dsh-cordis-client-runner/lib/client.js:2564-2566` | `id 'dsh-subagent-model-turn-route'` (per-turn row) |
-| `conversation.chat.node` | `dsh-client-ui-chat/lib/client.js` (keyed by node kind) | the same kind, `visibility: hidden` — the store the tail row reads |
 
 ## What each seat tells you
 
@@ -178,11 +174,13 @@ when a generation actually splits that breakdown, the same breakdown cut by
 generation. That is the integration with the sibling `dsh-subagent-tree`: both
 facts come from one walk over `subagentCatalog`, so they read in one place.
 
-**The tree** puts a marker next to a subagent whose route is its own, and a
-quieter one when it merely inherits. With selection off every child inherits, so
-marking each one would mark all of them and say nothing — a marker therefore
-appears only for a subagent that differs, and its tooltip names the parent's
-model for comparison.
+**The bottom-bar chip** answers the same question for the whole run rather than
+for the conversation that happens to be open: how many subagents this session
+delegated to, and which models they ran on. It lives in
+`conversation.composer.dock`, the row below the composer beside the built-in
+ContextMeter — the same slot and the same control shape the sibling
+`dsh-opencode-router` uses for its proxy chip. It renders nothing at all for a
+run that never delegated, so an ordinary conversation grows no extra furniture.
 
 **The hover card** answers "what was this conversation". Each row is read from a
 projection the client already holds and appears only when its value is present,
@@ -190,7 +188,18 @@ so a zero never reads as "did nothing": model and effort, turns and steps, activ
 time, generated tokens, the delegating agent's own task label, and the mode that
 decides whether the session can be continued.
 
-## Per-turn model history
+## Per-turn model history — implemented but not mounted
+
+`src/client.route-history.js` is a complete implementation of per-turn route
+history, but **nothing loads it**: `src/client.js` only calls `require.async` for
+`./client.model.js`. The file is inert and contributes nothing to the UI. It is
+left in the package because it is a finished, self-contained piece of work whose
+reader has to match the current projection shape before it is mounted.
+
+The route shown for any session therefore comes from the `modelSelection`
+projection only. Per-turn accuracy would require mounting this chunk and adding
+a `conversation.chat.turnTail` seat; see the reasoning below for why that was not
+done.
 
 `request/header` is the event recording each request's route. Nothing in
 `SessionProjectionMap` ships it, so the chip reads the `modelSelection`
@@ -235,7 +244,7 @@ Four states are kept apart, because collapsing them would print a lie:
 | `src/model.js` | the pure logic, as plain ESM for the unit suite |
 | `src/client.js` | the browser half; registers all seats |
 | `src/client.model.js` | the same pure logic as a browser chunk the half loads |
-| `src/client.route-history.js` | the `request/header` fold and the per-turn route map |
+| `src/client.route-history.js` | the `request/header` fold and the per-turn route map — **not currently loaded**, see above |
 | `locale/{en,ro}.json` | dictionaries for namespace `dsh-subagent-model` |
 | `scripts/unit.mjs` | `node --test` suite for `src/model.js` and locale parity |
 | `scripts/check-plugin.mjs` | manifest, patch, exports, browser-half contract |

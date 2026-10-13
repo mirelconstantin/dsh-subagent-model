@@ -1,33 +1,12 @@
 {
   "chip": {
     "prefix": "model",
-    "aria": "Session model: {model}",
     "title": "This session runs on {model}",
     "titleWithEffort": "This session runs on {model} at {effort} effort",
     "titleInherited": "This session inherited {model} from its parent",
     "unknown": "no model yet",
     "pending": "switching",
-    "inherited": "inherited",
-    "total": "{count} in total, nested included",
-    "differs": "Own model {model} — differs from the parent ({parent})",
-    "treeInherited": "Inherits {model} from its parent",
-    "own": "Own model {model}",
-    "countTotal": "{count} subagents",
-    "countRunning": "{count} running",
-    "treeAria": "Subagent sessions",
-    "loading": "Loading subagents…",
-    "loadError": "Unable to load subagents",
-    "retry": "Retry",
-    "openAside": "Open aside",
-    "openAsideAria": "Open {label} aside",
-    "modeOneShot": "one-shot",
-    "modeContinuable": "continuable",
-    "modeUnknown": "mode unknown",
-    "actRunning": "running",
-    "actCompleted": "completed",
-    "actInactive": "idle",
-    "branchExpand": "Expand {label}",
-    "branchCollapse": "Collapse {label}"
+    "inherited": "inherited"
   },
   "tip": {
     "summary": "{count} subagents:",
@@ -41,7 +20,6 @@
   },
   "row": {
     "label": "Model",
-    "unknown": "No model yet",
     "inherited": "Inherited from parent",
     "inheritedFrom": "inherited",
     "title": "The model this session last used, or is about to use",
@@ -60,13 +38,6 @@
     "mode": "Kind",
     "modeOneShot": "one-shot, read-only",
     "modeContinuable": "continuable"
-  },
-  "route": {
-    "label": "Ran on",
-    "title": "This turn ran on {model}",
-    "switchedTitle": "This turn ran on {model}, re-routed from {from}",
-    "effortDefaulted": "(adapter default)",
-    "switchedFrom": "(was {from})"
   },
   "dock": {
     "subagents": "{count} subagents in this run",

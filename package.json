@@ -1,7 +1,7 @@
 {
   "name": "dsh-subagent-model",
   "version": "1.0.0",
-  "description": "Model visibility for DeepSeek Harness: a header chip naming the model and reasoning effort each Session runs on, a subagent dropdown that marks which child carries its own route, and sidebar hover cards showing what each conversation actually did.",
+  "description": "Model visibility for DeepSeek Harness: a header chip naming the model and reasoning effort each Session runs on, a bottom-bar chip showing which models a whole run delegated to, and sidebar hover cards showing what each conversation actually did. It only adds controls — the shipped subagent dropdown is untouched.",
   "icon": "./icon.svg",
   "type": "module",
   "main": "./src/index.js",
