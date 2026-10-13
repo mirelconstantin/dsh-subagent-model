@@ -27,7 +27,17 @@
  */
 
 window.__ModuleLoader__.load({
-  id: 'dsh-subagent-model/client.model.js',
+  // The bare PACKAGE name, exactly as the shipped sibling chunks declare it
+  // (`@deepseek-ai/dsh-client-ui-sidebar-terminal/lib/client.terminal.js:2`).
+  // The runtime derives the module-table key itself as `chunkId(ownerId, chunk)`
+  // = `${id}/${chunk}` (`dsh-client-modules/lib/client.js:476-478`, and the same
+  // at `:572`), so putting the path in `id` registered this chunk under
+  // `dsh-subagent-model/client.model.js/client.model.js` — a key no
+  // `require.async('./client.model.js')` ever looks up. That request then
+  // rejected, `apply` swallowed it, `modelChunk` stayed null, and `withModel`
+  // rendered null for EVERY seat: no header chip, no bottom-bar chip, no hover
+  // row, and nothing on screen to say why.
+  id: 'dsh-subagent-model',
   chunk: 'client.model.js',
   factory: (require) => {
     var module = { exports: {} };

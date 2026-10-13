@@ -1009,38 +1009,34 @@ window.__ModuleLoader__.load({
     /**
      * Park a step until its service exists, then run it once.
      *
-     * `slots` and `locale` are NOT declared on `inject`, so this half loads at
-     * boot instead of waiting on a service gate. They are still not guaranteed
-     * to EXIST when `apply` runs: the runtime `await()`s only the services a
-     * row declares (`fiber.inject`), so with an empty gate `apply` may run
-     * before `ui-renderer` has provided `slots`
-     * (`dsh-client-ui-renderer/lib/client.js:1843`) or before `locale`
-     * (`dsh-client-locale/lib/client.js:1526`).
+     * Both services this half needs are now declared on `inject`, so by the time
+     * `apply` runs they are provided and activated and the first `read()` below
+     * returns them immediately — this is a straight call, not a wait.
      *
-     * The gate used to hide that, but it also made the row wait on services
-     * whose provider lives in the very packages this plugin sits beside — a
-     * wait that can fail the whole boot. So: ask politely, then retry when one
-     * appears, and give up quietly if it never does.
+     * The retry remains as the fallback for a host that provides them later or not
+     * at all: it reads non-strictly (see {@link whenService}), and gives up quietly
+     * so a missing provider costs the seats that needed it and nothing else.
      *
-     * The retry rides `setTimeout`, which needs no declared service (the ctx
-     * timer verbs are gated on `inject: ['timer']`,
-     * `dsh-cordis-client-runner/lib/client.js:217-223,347`), so the empty gate
-     * stays empty and the boot is not held. Nothing else may be touched on a
-     * dynamic `ctx`: any other property read is either a service read that
-     * rejects with `service "x" is not declared by your plugin` (`:331`) or
-     * reaches cordis's own gate and throws `cannot get property "x" without
-     * inject` (`@deepseek-ai/cordis/lib/index.js:676`). `ctx.get` is the one
-     * sanctioned optional lookup (`:344`).
-     *
-     * @param {object} ctx - Client context; may already expose `get`.
-     * @param {string} name - Service to wait for.
+     * @param {object} ctx - Client context.
+     * @param {string} name - Service to obtain.
      * @param {function(any): void} use - Called once with the service.
      * @returns {void}
      */
     function whenService(ctx, name, use) {
+      // `ctx.get(name)` DEFAULTS TO STRICT (`@deepseek-ai/cordis/lib/index.js:763`),
+      // and the strict read returns `undefined` unless the providing fiber is fully
+      // activated (`state === 2`, `:770`). A `setTimeout` poll therefore spends its
+      // whole budget returning `undefined` for a service that exists and is about to
+      // activate — and this plugin then registers NO seat at all: no header chip, no
+      // bottom-bar chip, no hover row, with nothing on screen to say why. That was
+      // the reported symptom.
+      //
+      // `strict = false` drops the activation gate and returns the value as soon as
+      // the service is provided, which is exactly what a poller wants. The truthy
+      // check below then re-verifies the value is really there.
       const read = () => {
         try {
-          return typeof ctx.get === 'function' ? ctx.get(name) : undefined
+          return typeof ctx.get === 'function' ? ctx.get(name, false) : undefined
         } catch (e) {
           return undefined
         }
@@ -1060,17 +1056,21 @@ window.__ModuleLoader__.load({
       // `slots` first.
       //
       // The budget is a backstop for a boot where the provider never arrives;
-      // normal provider installation lands within a few turns.
-      let attempts = 0
+      // normal provider installation lands within a few turns. It counts
+      // MILLISECONDS, not turns: a zero-delay chain of `setTimeout(…, 0)` can
+      // run hundreds of iterations inside a single macrotask window, long before
+      // the renderer has activated, so a turn budget expires while the service is
+      // merely still booting. Two seconds of real time is comfortably longer than
+      // a shell boot and short enough not to leak.
+      const startedAt = Date.now()
       const poll = () => {
         const later = read()
         if (later !== null && later !== undefined) {
           use(later)
           return
         }
-        attempts += 1
-        if (attempts >= 600) return
-        setTimeout(poll, 0)
+        if (Date.now() - startedAt >= 2000) return
+        setTimeout(poll, 16)
       }
       setTimeout(poll, 0)
     }
@@ -1368,19 +1368,17 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      // NO declared services, deliberately — the same load-bearing shape the
-      // sibling `dsh-subagent-tree` half documents. Naming `slots` here makes
-      // `fiber.await()` park this row until the renderer provides it, while the
-      // renderer in turn waits on the UI packages this row is mounted beside;
-      // the two can wait on each other and the whole boot fails. With an empty
-      // gate `apply` runs before `slots` exists, which is what `whenService`
-      // above bridges.
+      // The two services the registrations need, declared exactly as the sibling
+      // `dsh-opencode-router` half declares them
+      // (`plugins/dsh-opencode-router/src/client/index.ts:64`). Naming them makes
+      // cordis hold this row until the renderer and the locale runtime have
+      // activated, which turns a race into a guarantee — the empty-gate-plus-poll
+      // shape this file used before could exhaust its budget and register nothing.
       //
       // The store hooks (`useSessions`, `useSessionStatus`) and the `sessionId`
-      // prop are NOT services at all — the renderer passes them to every slot
-      // entry as standard props — so naming `sessions` here would only wait on
-      // a provider this row never uses.
-      inject: [],
+      // prop are NOT services — the renderer passes them to every slot entry as
+      // standard props — so `sessions` is deliberately absent.
+      inject: ['slots', 'locale'],
       apply,
     }
   },

@@ -273,14 +273,32 @@ check('src/client.js registers through window.__ModuleLoader__.load', async () =
   assert.match(code, /window\.__ModuleLoader__\.load\(/)
 })
 
-check('src/client.js declares no services', async () => {
+check('src/client.js declares exactly the two seat services', async () => {
   const { code } = await views('src/client.js')
-  // `inject: []` is load-bearing: naming `slots` parks this row on a service
-  // whose provider sits in the very packages this row is mounted beside, and
-  // the two can wait on each other until the boot fails. Comment-free, so the
-  // notes quoting `inject: ['timer']` cannot satisfy the negative assertion.
-  assert.match(code, /inject:\s*\[\s*\],/)
-  assert.ok(!/inject:\s*\[(?!\s*\])/.test(code), 'client.js must not declare service dependencies')
+  // `inject` names `slots` and `locale` — the same pair the sibling
+  // `dsh-opencode-router` half declares (src/client/index.ts:64). Declaring them
+  // makes cordis hold the row until the renderer and locale runtime have
+  // ACTIVATED, which turns the service race into a guarantee.
+  //
+  // An empty `inject` with a `setTimeout` poll was the shape before, and it was
+  // NOT enough: `ctx.get` is gated on the provider fiber reaching state 2
+  // (`@deepseek-ai/cordis/lib/index.js:770`), so the seats registered only if the
+  // poll happened to outlive the renderer's activation. Declaring the dependency
+  // removes the race rather than winning it.
+  //
+  // `sessions` is deliberately absent: the store hooks are standard PROPS handed
+  // to a slot component by the renderer, not services.
+  assert.match(code, /inject:\s*\[\s*'slots',\s*'locale',?\s*\]/)
+  // Anything beyond the pair would park the row on a provider it never uses.
+  for (const name of ['sessions', 'timer', 'resources', 'uiWorkspace']) {
+    assert.ok(
+      !new RegExp(`inject:\\s*\\[[^\\]]*'${name}'`).test(code),
+      `${name} must not be a declared service dependency`,
+    )
+  }
+  // The non-strict read is what makes the remaining poll a usable fallback: the
+  // strict read returns undefined for a provider that exists but is still booting.
+  assert.match(code, /ctx\.get\(name, false\)/)
 })
 
 /* ------------------------------------------------------------------ *
@@ -389,9 +407,11 @@ check('the shared logic lives in the chunk, which is loaded through require.asyn
   }
 
   // The chunk is served raw, so it must self-register under the name
-  // `importChunk` looks for, and it must stay a classic script.
+  // `importChunk` looks for, and it must stay a classic script. The `id` is the
+  // bare PACKAGE name — the runtime appends `/<chunk>` itself
+  // (dsh-client-modules/lib/client.js:476-478).
   assert.match(chunk, /window\.__ModuleLoader__\.load\(/)
-  assert.match(chunk, /id:\s*'dsh-subagent-model\/client\.model\.js'/)
+  assert.match(chunk, /id:\s*'dsh-subagent-model'/)
   assert.match(chunk, /chunk:\s*'client\.model\.js'/)
   assert.match(chunk, /return module\.exports/)
   assert.ok(!/^\s*import\s/m.test(chunk), 'client.model.js must not use import')
@@ -561,7 +581,40 @@ check('no seat claims a shipped cell', async () => {
   }
 })
 
-// The defect that made subagents vanish from the summary the chips read.
+check('client.model.js registers under the bare package name', async () => {
+  // Comment-free: the explanatory comment above the registration QUOTES the old
+  // wrong value, and a raw-text match would read that as the declaration.
+  const { code: chunk } = await views('src/client.model.js')
+  const main = await read('src/client.js')
+  // THE defect that made this plugin render nothing at all, silently.
+  //
+  // The runtime keys a chunk itself as `chunkId(ownerId, chunk)` = `${id}/${chunk}`
+  // (dsh-client-modules/lib/client.js:476-478, and the same composition at
+  // `:572`). So the `id` field must be the bare PACKAGE name — exactly what the
+  // shipped sibling chunks use
+  // (@deepseek-ai/dsh-client-ui-sidebar-terminal/lib/client.terminal.js:2).
+  //
+  // This file used to say `id: 'dsh-subagent-model/client.model.js'`, which
+  // registered the chunk under `dsh-subagent-model/client.model.js/client.model.js`
+  // — a key no `require.async('./client.model.js')` ever looks up. That request
+  // rejected, `apply` swallowed the rejection, `modelChunk` stayed null, and
+  // `withModel` returned null for EVERY seat: no header chip, no bottom-bar chip,
+  // no hover row, and nothing on screen to explain it.
+  const id = chunk.match(/^\s*id:\s*'([^']+)'/m)
+  assert.ok(id, 'client.model.js must declare an id')
+  assert.equal(id[1], 'dsh-subagent-model',
+    `the chunk id must be the bare package name, got ${JSON.stringify(id[1])}`)
+  assert.match(chunk, /^\s*chunk:\s*'client\.model\.js',?$/m)
+  // The main bundle must declare the same package id, or the owner differs and
+  // the derived key can never match.
+  const mainId = main.match(/^\s*id:\s*'([^']+)'/m)
+  assert.equal(mainId?.[1], 'dsh-subagent-model', 'client.js must declare the same package id')
+  // And the request must be relative, which is the only form that routes to a
+  // package-local chunk (`require.async` ignores anything not starting with './').
+  assert.match(main, /require\.async\('\.\/client\.model\.js'\)/)
+})
+
+// The defect that made subagents vanish from the summaries the chips read.
 check('the catalog is read from every session row, not only loaded stores', async () => {
   const { code } = await views('src/client.js')
   const chunk = await read('src/client.model.js')
